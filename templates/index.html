@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Automata Theory Visualizer</title>
+  <meta name="automata-api-base" content="__AUTOMATA_API_BASE__" />
+  <link rel="stylesheet" href="/static/css/styles.css" />
+  <!-- Viz.js renders Graphviz DOT in the browser via WASM -->
+  <script src="https://cdn.jsdelivr.net/npm/@viz-js/viz@3.7.0/lib/viz-standalone.js"></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <h1 class="brand">Automata<br/><span>Visualizer</span></h1>
+
+    <label class="label" for="expression">Expression</label>
+    <select id="expression"></select>
+    <div id="regex-display" class="regex-display"></div>
+
+    <hr/>
+
+    <label class="label" for="input">Test String</label>
+    <input id="input" type="text" placeholder="Enter string..." autocomplete="off" />
+    <div id="alphabet-hint" class="hint">Alphabet: { }</div>
+    <button id="test-btn" class="primary">Test</button>
+    <div id="result" class="result"></div>
+
+    <hr/>
+
+    <label class="label">View</label>
+    <div class="view-buttons">
+      <button data-view="dfa" class="view-btn active">DFA</button>
+      <button data-view="cfg" class="view-btn">CFG</button>
+      <button data-view="pda" class="view-btn">PDA</button>
+    </div>
+
+    <div class="spacer"></div>
+    <div id="state-count" class="hint">States: 0</div>
+  </aside>
+
+  <main class="viz">
+    <section id="view-dfa" class="panel active">
+      <header class="panel-header">
+        <h2>Deterministic Finite Automaton</h2>
+        <div class="panel-controls">
+          <button id="dfa-play">Play</button>
+          <button id="dfa-step">Step</button>
+          <button id="dfa-reset">Reset</button>
+        </div>
+      </header>
+      <div id="dfa-graph" class="graph"></div>
+      <div id="dfa-trace" class="trace"></div>
+    </section>
+
+    <section id="view-cfg" class="panel">
+      <header class="panel-header">
+        <h2>Context-Free Grammar</h2>
+      </header>
+      <pre id="cfg-text" class="cfg-text"></pre>
+      <div class="legend">
+        <span><b style="color:#89b4fa">S, A, B…</b> Variables</span>
+        <span><b style="color:#a6e3a1">a, b, 0, 1</b> Terminals</span>
+        <span><b style="color:#f9e2af">→</b> Production</span>
+        <span><b style="color:#6c7086">|</b> OR</span>
+        <span><b style="color:#cba6f7">ε</b> Empty string</span>
+      </div>
+    </section>
+
+    <section id="view-pda" class="panel">
+      <header class="panel-header">
+        <h2>Pushdown Automaton</h2>
+        <div class="panel-controls">
+          <button id="pda-play">Play</button>
+          <button id="pda-step">Step</button>
+          <button id="pda-reset">Reset</button>
+        </div>
+      </header>
+      <div class="pda-layout">
+        <div id="pda-graph" class="graph"></div>
+        <div class="pda-side">
+          <h3>Stack</h3>
+          <div id="pda-stack" class="stack"></div>
+          <h3>Trace</h3>
+          <div id="pda-trace" class="trace"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

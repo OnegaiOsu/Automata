@@ -1,0 +1,20 @@
+# Local development
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+.DS_Store
+
+# Build artifacts (desktop)
+build/
+dist/
+*.spec.bak
+
+# Heavy bundled tooling (desktop only — not needed for web deploy)
+Graphviz-14.1.2-win64/
+
+# Tests / scratch
+test_*.py
+trace_dfa.py
+check_initial.py

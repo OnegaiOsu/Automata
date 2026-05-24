@@ -1,0 +1,59 @@
+name: Deploy Frontend and Backend
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build static frontend
+        env:
+          AUTOMATA_API_BASE: ${{ secrets.AUTOMATA_API_BASE }}
+        run: python scripts/build_frontend.py
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist --project-name=${{ secrets.CLOUDFLARE_PAGES_PROJECT }}
+
+  deploy-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Build and push image to ACR
+        env:
+          AZURE_ACR_NAME: ${{ secrets.AZURE_ACR_NAME }}
+        run: |
+          az acr build \
+            --registry "$AZURE_ACR_NAME" \
+            --image automata-web:${{ github.sha }} \
+            --image automata-web:latest \
+            .
+
+      - name: Update Azure Container App
+        env:
+          AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
+          AZURE_CONTAINERAPP_NAME: ${{ secrets.AZURE_CONTAINERAPP_NAME }}
+          AZURE_ACR_NAME: ${{ secrets.AZURE_ACR_NAME }}
+        run: |
+          az containerapp update \
+            -n "$AZURE_CONTAINERAPP_NAME" \
+            -g "$AZURE_RESOURCE_GROUP" \
+            --image "$AZURE_ACR_NAME.azurecr.io/automata-web:latest"

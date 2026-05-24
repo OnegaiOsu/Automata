@@ -1,0 +1,4 @@
+# Web app (Flask) dependencies — desktop deps (PyQt6) are NOT required to deploy.
+Flask>=3.0.0
+Flask-Cors>=4.0.0
+gunicorn>=21.2.0

@@ -1,0 +1,260 @@
+/* Automata Visualizer — web styles. Catppuccin Mocha-ish palette. */
+
+:root {
+  --bg: #11111b;
+  --panel: #1e1e2e;
+  --panel-2: #181825;
+  --surface: #313244;
+  --surface-2: #45475a;
+  --text: #cdd6f4;
+  --muted: #a6adc8;
+  --dim: #6c7086;
+  --blue: #89b4fa;
+  --green: #a6e3a1;
+  --red: #f38ba8;
+  --yellow: #f9e2af;
+  --mauve: #cba6f7;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+}
+
+body {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 100vh;
+}
+
+/* ---------- Sidebar ---------- */
+.sidebar {
+  background: var(--panel-2);
+  border-right: 1px solid var(--surface);
+  padding: 18px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.brand {
+  font-size: 22px;
+  margin: 0 0 6px;
+  color: var(--blue);
+  line-height: 1.1;
+}
+.brand span { color: var(--muted); font-size: 14px; font-weight: 400; }
+
+.label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+  margin-top: 6px;
+}
+
+select, input[type="text"] {
+  width: 100%;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--surface-2);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  outline: none;
+}
+select:focus, input:focus { border-color: var(--blue); }
+
+.regex-display {
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 8px;
+  word-break: break-all;
+  border: 1px solid var(--surface-2);
+}
+
+.hint { color: var(--dim); font-size: 11px; }
+
+hr {
+  width: 100%;
+  border: 0;
+  border-top: 1px solid var(--surface);
+  margin: 6px 0;
+}
+
+button {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--surface-2);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.05s;
+}
+button:hover { background: var(--surface-2); }
+button:active { transform: translateY(1px); }
+
+button.primary {
+  background: var(--blue);
+  color: #1e1e2e;
+  border-color: var(--blue);
+  font-weight: 600;
+}
+button.primary:hover { background: #b4befe; }
+
+.view-buttons { display: flex; flex-direction: column; gap: 6px; }
+.view-btn { text-align: left; }
+.view-btn.active {
+  background: var(--blue);
+  color: #1e1e2e;
+  border-color: var(--blue);
+  font-weight: 600;
+}
+
+.spacer { flex: 1; }
+
+.result {
+  text-align: center;
+  font-weight: 700;
+  padding: 6px;
+  border-radius: 6px;
+  min-height: 16px;
+}
+.result.accepted { background: #1e3a2f; color: var(--green); border: 1px solid var(--green); }
+.result.rejected { background: #3a1e2f; color: var(--red); border: 1px solid var(--red); }
+
+/* ---------- Main viz area ---------- */
+.viz { padding: 18px; overflow: hidden; }
+
+.panel { display: none; height: calc(100vh - 36px); flex-direction: column; }
+.panel.active { display: flex; }
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.panel-header h2 { margin: 0; color: var(--blue); }
+.panel-controls { display: flex; gap: 6px; }
+
+.graph {
+  flex: 1;
+  background: var(--panel-2);
+  border: 1px solid var(--surface);
+  border-radius: 12px;
+  padding: 12px;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.graph svg { max-width: 100%; height: auto; }
+
+/* Highlight classes injected onto SVG nodes/edges */
+.graph .node.active ellipse,
+.graph .node.active polygon { stroke: var(--green) !important; stroke-width: 4 !important; fill: #1e3a2f !important; }
+.graph .edge.active path,
+.graph .edge.active polygon { stroke: var(--green) !important; fill: var(--green) !important; stroke-width: 3 !important; }
+.graph .node text { fill: var(--text) !important; }
+.graph .edge text { fill: var(--muted) !important; }
+
+.trace {
+  margin-top: 10px;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--surface);
+  border-radius: 8px;
+  padding: 10px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.trace .step { color: var(--muted); margin: 2px 0; }
+.trace .step.current { color: var(--yellow); font-weight: 700; }
+
+.cfg-text {
+  flex: 1;
+  background: var(--panel-2);
+  border: 1px solid var(--surface);
+  border-radius: 12px;
+  padding: 20px;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 15px;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow: auto;
+  margin: 0;
+}
+
+.legend {
+  margin-top: 12px;
+  display: flex;
+  gap: 22px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* PDA layout */
+.pda-layout {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: 12px;
+  min-height: 0;
+}
+.pda-side {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--surface);
+  border-radius: 12px;
+  padding: 12px;
+  overflow: hidden;
+}
+.pda-side h3 { margin: 4px 0; color: var(--blue); font-size: 14px; }
+.stack {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 4px;
+  background: var(--bg);
+  border: 1px solid var(--surface);
+  border-radius: 8px;
+  padding: 8px;
+  min-height: 140px;
+}
+.stack .symbol {
+  background: var(--surface);
+  border: 1px solid var(--blue);
+  color: var(--text);
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-weight: 700;
+  text-align: center;
+  padding: 6px;
+  border-radius: 6px;
+  transition: background 0.15s, border-color 0.15s;
+}
+.stack .symbol.pushed { background: #1e3a2f; border-color: var(--green); }
+.stack .symbol.popped { background: #3a1e2f; border-color: var(--red); }
+
+@media (max-width: 900px) {
+  body { grid-template-columns: 1fr; }
+  .sidebar { position: static; height: auto; }
+  .panel { height: auto; }
+  .pda-layout { grid-template-columns: 1fr; }
+}

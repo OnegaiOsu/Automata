@@ -1,0 +1,2 @@
+# Web app runtime config for platforms that read runtime.txt (Heroku, Render).
+python-3.12.5
