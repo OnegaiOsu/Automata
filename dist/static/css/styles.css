@@ -159,17 +159,10 @@ button.primary:hover { background: #b4befe; }
   padding: 12px;
   overflow: auto;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
 }
 .graph svg { max-width: 100%; height: auto; }
-
-/* PDA flowchart is tall — keep the SVG anchored at the top */
-#pda-graph {
-  align-items: flex-start;
-  justify-content: center;
-}
-#pda-graph svg { display: block; margin: 0 auto; }
 
 /* Highlight classes injected onto SVG nodes/edges */
 .graph .node.active ellipse,

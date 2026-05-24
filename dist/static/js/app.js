@@ -121,15 +121,17 @@ function buildPdaDot(pda) {
   };
   const shapeFor = (t) => {
     if (t === 'start' || t === 'accept' || t === 'reject') return 'ellipse';
-    // Both 'decision' and 'read' render as diamonds to match the
-    // reference flowcharts (image 3 / image 5).
-    return 'diamond';
+    if (t === 'decision') return 'diamond';
+    return 'rectangle';
   };
 
-  // PDA edge labels show only the input symbol (△ for null/ε).
-  const NULL = '△';
+  // Simplify PDA label: only show stack ops when they are non-trivial.
   const pdaLabel = (t) => {
-    return (t.input_symbol || 'ε').replaceAll('ε', NULL);
+    const sym  = t.input_symbol || 'ε';
+    const pop  = t.stack_pop  || 'ε';
+    const push = t.stack_push || 'ε';
+    if (pop === 'ε' && push === 'ε') return sym;    // pure input, no stack work
+    return `${sym}, ${pop}/${push}`;                // full PDA notation
   };
 
   const lines = [
@@ -145,10 +147,7 @@ function buildPdaDot(pda) {
     const c = borderColor[s.state_type] || '#89b4fa';
     const f = fillColor[s.state_type]   || '#313244';
     const shape = shapeFor(s.state_type);
-    const label = (s.label && s.label.length) ? s.label : s.name;
-    // Make diamonds a bit wider so the "Read" text fits nicely.
-    const sizing = shape === 'diamond' ? ', width=1.2, height=0.7, fixedsize=true' : '';
-    lines.push(`  "${s.name}" [shape=${shape}, label="${label}", color="${c}", fillcolor="${f}"${sizing}];`);
+    lines.push(`  "${s.name}" [shape=${shape}, color="${c}", fillcolor="${f}"];`);
   }
   for (const t of pda.transitions) {
     const lbl = pdaLabel(t);
@@ -166,8 +165,6 @@ async function renderPDA(pda) {
   applyDarkThemeSVG(svg);
   container.innerHTML = '';
   container.appendChild(svg);
-  // Always start at the top of tall PDA diagrams
-  container.scrollTop = 0;
 }
 
 function renderCFG(text) {
