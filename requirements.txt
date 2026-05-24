@@ -1,7 +1,7 @@
 # Automata Theory Visualization Application
 # Core dependencies
 PyQt6>=6.6.0
-automata-lib[visual]>=8.0.0
+automata-lib>=8.0.0
 graphviz>=0.20.0
 
 # Build tools

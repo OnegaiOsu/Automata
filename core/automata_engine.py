@@ -53,6 +53,7 @@ class PDAState:
     name: str
     state_type: str  # 'start', 'read', 'reject', 'accept', 'decision'
     description: str = ""
+    label: str = ""  # Display label (defaults to name if blank)
 
 
 @dataclass
@@ -174,40 +175,46 @@ class AutomataEngine:
     def _build_expression1_dfa(self):
         """
         Build the custom DFA matching the user's diagram for Expression 1.
-        States match the user's diagram: - (initial), q1, q3, q1', q4, T, q5, q6, q7, q8, + (final)
+        States: - (initial), q1 (top, aba-path), q2 (bottom, bab-path),
+        q3, q4, T (trap), q5, q6, q7, q8, + (final).
+
+        Expression: (aba+bab)(a+b)*(bab)(a+b)*(a+b+ab+ba)(a+b+aa)*
         """
-        states = {'-', 'q1', 'q3', 'q1\'', 'q4', 'T', 'q5', 'q6', 'q7', 'q8', '+'}
+        states = {'-', 'q1', 'q2', 'q3', 'q4', 'T', 'q5', 'q6', 'q7', 'q8', '+'}
         alphabet = {'a', 'b'}
         initial_state = '-'
         final_states = {'+'}
-        
-        # Transitions matching the user's DFA diagram exactly
-        # Expression: (aba+bab)(a+b)*(bab)(a+b)*(a+b+ab+ba)(a+b+aa)*
+
+        # Transitions match the user's DFA diagram exactly.
+        # - 'aba' path: - --a--> q1 --b--> q3 --a--> q5
+        # - 'bab' path: - --b--> q2 --a--> q4 --b--> q5
+        # Any deviation funnels to the dead/trap state T (self-loops on a,b).
         transitions = {
             # Initial branching for (aba+bab)
-            '-': {'a': 'q1', 'b': 'q1\''},   # Start: a->q1 (aba path), b->q1' (bab path)
-            
-            # aba path: q1 --b--> q3 --a--> T
-            'q1': {'b': 'q3', 'a': 'q1'},    # Need 'b' for aba, self-loop on 'a'
-            'q3': {'a': 'T', 'b': 'q3'},     # Need 'a' to complete aba -> T
-            
-            # bab path: q1' --a--> q4 --b--> T
-            'q1\'': {'a': 'q4', 'b': 'q1\''}, # Need 'a' for bab
-            'q4': {'b': 'T', 'a': 'q4'},     # Need 'b' to complete bab -> T
-            
-            # T state: (a+b)* self-loop, then 'a' starts looking for 'bab'
-            'T': {'a': 'q5', 'b': 'T'},      # Self-loop on 'b', 'a' starts bab detection
-            
-            # Looking for 'bab' pattern after first (a+b)*
-            'q5': {'b': 'q6', 'a': 'q5'},    # Got 'a', need 'b'
-            'q6': {'a': 'q7', 'b': 'q6'},    # Got 'ab', need 'a' (with b self-loop)
-            'q7': {'b': 'q8', 'a': 'q5'},    # Got 'aba', need 'b' for second 'bab'
-            
-            # After bab, checking (a+b+ab+ba) and going to final
-            'q8': {'a': '+', 'b': '+'},      # Any of a,b leads to final
-            
-            # Final state with (a+b+aa)* - self-loops for acceptance
-            '+': {'a': '+', 'b': '+'},       # Accept and stay (a+b+aa)*
+            '-':  {'a': 'q1', 'b': 'q2'},
+
+            # aba path: must read 'b' next, then 'a'
+            'q1': {'a': 'T',  'b': 'q3'},
+            'q3': {'a': 'q5', 'b': 'T'},
+
+            # bab path: must read 'a' next, then 'b'
+            'q2': {'a': 'q4', 'b': 'T'},
+            'q4': {'a': 'T',  'b': 'q5'},
+
+            # Trap state: once here, stay here forever
+            'T':  {'a': 'T',  'b': 'T'},
+
+            # Search for the inner 'bab' inside (a+b)* (bab) (a+b)*
+            'q5': {'a': 'q5', 'b': 'q6'},   # waiting for 'b'
+            'q6': {'a': 'q7', 'b': 'q6'},   # got 'b', need 'a'
+            'q7': {'a': 'q5', 'b': 'q8'},   # got 'ba', need 'b'; 'a' restarts search
+
+            # After the inner 'bab' we still need at least one more symbol
+            # to satisfy (a+b+ab+ba); from q8 either symbol enters final.
+            'q8': {'a': '+',  'b': '+'},
+
+            # Final state: (a+b+aa)* keeps us here.
+            '+':  {'a': '+',  'b': '+'},
         }
         
         self._dfa = CustomDFA(states, alphabet, transitions, initial_state, final_states)
@@ -235,51 +242,78 @@ class AutomataEngine:
     
     def _build_expression1_pda(self):
         """
-        Build the PDA matching the user's flowchart diagram for Expression 1.
-        Uses a flowchart-style representation with decision nodes.
+        Build the PDA flowchart for Expression 1.
+        Mirrors the reference image: every non-terminal node is a
+        diamond labelled "Read", with a single Start oval at top,
+        a central Reject oval reached by bad branches, and an
+        Accept oval at the bottom.
+
+        Expression: (aba+bab)(a+b)*(bab)(a+b)*(a+b+ab+ba)(a+b+aa)*
         """
-        # PDA States (flowchart style)
+        # ---- States ----------------------------------------------------
+        # All "read"/"decision" nodes use the display label "Read".
+        rd = lambda n: PDAState(n, 'read', '', 'Read')
+
         self._pda_states = [
-            PDAState('Start', 'start', 'Initial state'),
-            PDAState('Read1', 'decision', 'Read first symbol'),
-            PDAState('ReadA1', 'read', 'Path for aba'),
-            PDAState('ReadB1', 'read', 'Path for bab'),
-            PDAState('Reject', 'reject', 'Invalid input'),
-            PDAState('ReadA2', 'read', 'Continue aba'),
-            PDAState('ReadB2', 'read', 'Continue bab'),
-            PDAState('Loop1', 'decision', 'First (a+b)* loop'),
-            PDAState('Read2', 'read', 'Start bab search'),
-            PDAState('Read3', 'read', 'Middle of bab'),
-            PDAState('Read4', 'read', 'End of bab'),
-            PDAState('Loop2', 'decision', 'Second (a+b)* loop'),
-            PDAState('Read5', 'read', 'Check (a+b+ab+ba)'),
-            PDAState('Read6', 'read', 'Final pattern'),
-            PDAState('Loop3', 'decision', 'Final (a+b+aa)* loop'),
-            PDAState('Accept', 'accept', 'String accepted'),
+            PDAState('Start',  'start',  'Initial state', 'Start'),
+            rd('R0'),          # first symbol  (root of the split)
+            rd('RL1'),         # left branch  : second symbol of "bab"
+            rd('RR1'),         # right branch : second symbol of "aba"
+            PDAState('Reject', 'reject', 'Invalid input', 'Reject'),
+            rd('RL2'),         # left branch  : third symbol of "bab"
+            rd('RR2'),         # right branch : third symbol of "aba"
+            rd('L1A'),         # (a+b)* loop  — first half (self-loop a)
+            rd('L1B'),         # (a+b)* loop  — second half (self-loop b)
+            rd('B1'),          # inner "bab" : read 'b'
+            rd('B2'),          # inner "bab" : read 'a'
+            rd('B3'),          # inner "bab" : read 'b'
+            rd('L2'),          # second (a+b)* loop (self-loop a,b)
+            rd('D1'),          # (a+b+ab+ba) — consume one symbol
+            rd('L3'),          # final (a+b+aa)* loop (self-loop a,b)
+            PDAState('Accept', 'accept', 'String accepted', 'Accept'),
         ]
-        
-        # PDA Transitions
+
+        # ---- Transitions ----------------------------------------------
         self._pda_transitions = [
-            PDATransition('Start', 'Read1', 'ε', 'ε', 'Z'),
-            PDATransition('Read1', 'ReadA1', 'a', 'ε', 'ε'),
-            PDATransition('Read1', 'ReadB1', 'b', 'ε', 'ε'),
-            PDATransition('ReadA1', 'Reject', 'a', 'ε', 'ε'),
-            PDATransition('ReadA1', 'ReadA2', 'b', 'ε', 'ε'),
-            PDATransition('ReadB1', 'ReadB2', 'a', 'ε', 'ε'),
-            PDATransition('ReadB1', 'Reject', 'b', 'ε', 'ε'),
-            PDATransition('ReadA2', 'Loop1', 'a', 'ε', 'ε'),
-            PDATransition('ReadB2', 'Loop1', 'b', 'ε', 'ε'),
-            PDATransition('Loop1', 'Loop1', 'a,b', 'ε', 'ε'),
-            PDATransition('Loop1', 'Read2', 'ε', 'ε', 'ε'),
-            PDATransition('Read2', 'Read3', 'b', 'ε', 'ε'),
-            PDATransition('Read3', 'Read4', 'a', 'ε', 'ε'),
-            PDATransition('Read4', 'Loop2', 'b', 'ε', 'ε'),
-            PDATransition('Loop2', 'Loop2', 'a,b', 'ε', 'ε'),
-            PDATransition('Loop2', 'Read5', 'ε', 'ε', 'ε'),
-            PDATransition('Read5', 'Read6', 'a,b', 'ε', 'ε'),
-            PDATransition('Read6', 'Loop3', 'a,b', 'ε', 'ε'),
-            PDATransition('Loop3', 'Loop3', 'a,b', 'ε', 'ε'),
-            PDATransition('Loop3', 'Accept', 'ε', 'Z', 'ε'),
+            PDATransition('Start', 'R0',   'ε', 'ε', 'Z'),
+
+            # First symbol: split into "aba"/"bab" branches
+            PDATransition('R0',  'RL1',    'b', 'ε', 'ε'),
+            PDATransition('R0',  'RR1',    'a', 'ε', 'ε'),
+
+            # Second symbol of each branch
+            PDATransition('RL1', 'RL2',    'a', 'ε', 'ε'),
+            PDATransition('RL1', 'Reject', 'b', 'ε', 'ε'),
+            PDATransition('RR1', 'RR2',    'b', 'ε', 'ε'),
+            PDATransition('RR1', 'Reject', 'a', 'ε', 'ε'),
+
+            # Third symbol of each branch then both paths merge
+            PDATransition('RL2', 'L1A',    'b', 'ε', 'ε'),
+            PDATransition('RR2', 'L1A',    'a', 'ε', 'ε'),
+
+            # (a+b)* first loop — drawn as two reads with self-loops
+            PDATransition('L1A', 'L1A',    'a',   'ε', 'ε'),
+            PDATransition('L1A', 'L1B',    'b',   'ε', 'ε'),
+            PDATransition('L1B', 'L1B',    'b',   'ε', 'ε'),
+            PDATransition('L1B', 'L1A',    'a',   'ε', 'ε'),
+            PDATransition('L1A', 'B1',     'ε',   'ε', 'ε'),
+            PDATransition('L1B', 'B1',     'ε',   'ε', 'ε'),
+
+            # Inner "bab"
+            PDATransition('B1',  'B2',     'b', 'ε', 'ε'),
+            PDATransition('B2',  'B3',     'a', 'ε', 'ε'),
+            PDATransition('B3',  'L2',     'b', 'ε', 'ε'),
+
+            # Second (a+b)* loop
+            PDATransition('L2',  'L2',     'a,b', 'ε', 'ε'),
+            PDATransition('L2',  'D1',     'ε',   'ε', 'ε'),
+
+            # (a+b+ab+ba) — one symbol consumed
+            PDATransition('D1',  'L3',     'a,b', 'ε', 'ε'),
+
+            # Final (a+b+aa)* loop then accept
+            PDATransition('L3',  'L3',     'a,b', 'ε', 'ε'),
+            PDATransition('L3',  'Accept', 'ε',   'Z', 'ε'),
         ]
     
     def _build_expression2_automata(self):
@@ -291,54 +325,60 @@ class AutomataEngine:
     def _build_expression2_dfa(self):
         """
         Build the custom DFA matching the user's diagram for Expression 2.
-        Expression: ((101+111+101) + (1+0+11)) (1+0+01)* (111+000+101) (1+0)*
-        States: - (initial), q1, q2, q3, q4, q5, q6, q7, q8, q9, q10, + (final)
+        Expression: ((101+111+101)+(1+0+11))(1+0+01)*(111+000+101)(1+0)*
+
+        Equivalent language: strings of length >= 4 whose first character
+        can be anything and which contain "111", "000", or "101" as a
+        substring at position >= 1 (i.e., after the 1-character prefix).
+
+        State semantics (matches the named states in the diagram):
+        - '-'  initial (empty)
+        - q1   read "1"            (length 1)
+        - q3   read "0"            (length 1)
+        - q2   read "11"           (length 2)
+        - q5   read "01"           (length 2)
+        - q8   read "10"           (length 2)
+        - q10  read "00"           (length 2)
+        - q4   steady, suffix "11" (length >= 3, trigger not yet seen)
+        - q6   steady, suffix "10" (length >= 3, trigger not yet seen)
+        - q7   steady, suffix "00" (length >= 3, trigger not yet seen)
+        - q9   steady, suffix "01" (length >= 3, trigger not yet seen)
+        - '+'  trigger has been recognised; accept all suffixes
         """
-        states = {'-', 'q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q10', '+'}
+        states = {'-', 'q1', 'q2', 'q3', 'q4', 'q5',
+                  'q6', 'q7', 'q8', 'q9', 'q10', '+'}
         alphabet = {'0', '1'}
         initial_state = '-'
         final_states = {'+'}
-        
-        # Transitions matching the user's DFA diagram exactly
-        # Expression: ((101+111+101)+(1+0+11))(1+0+01)*(111+000+101)(1+0)*
+
         transitions = {
-            # Initial state: branches on 0 or 1
-            '-': {'1': 'q1', '0': 'q3'},
-            
-            # q1: from initial on '1', leads to q2 on '1' or q3 on '0'
-            'q1': {'1': 'q2', '0': 'q3'},
-            
-            # q2: continues '11' path, goes to q4 on '1'
-            'q2': {'1': 'q4', '0': 'q6'},
-            
-            # q3: from '0' path, goes to q5 on '1', self-loop or back on '0'
-            'q3': {'1': 'q5', '0': 'q3'},
-            
-            # q4: part of middle section, connects to q6 on '0', to + on '1'
-            'q4': {'0': 'q6', '1': '+'},
-            
-            # q5: continues pattern, goes to q7 on '1'
-            'q5': {'1': 'q7', '0': 'q5'},
-            
-            # q6: connects to q8 on '0', q7 on '1'  
-            'q6': {'0': 'q8', '1': 'q7'},
-            
-            # q7: key state for (111+000+101) detection
-            'q7': {'0': 'q7', '1': 'q9'},
-            
-            # q8: part of '000' detection path
-            'q8': {'0': 'q10', '1': 'q7'},
-            
-            # q9: part of '111' detection, goes to + on '1'
-            'q9': {'1': '+', '0': 'q7'},
-            
-            # q10: end of '000', goes to + on '0'
-            'q10': {'0': '+', '1': 'q9'},
-            
-            # Final state: (1+0)* self-loop
-            '+': {'0': '+', '1': '+'},
+            # Layer 0 -> layer 1: consume first character
+            '-':  {'1': 'q1',  '0': 'q3'},
+
+            # Layer 1 -> layer 2: build the 2-character suffix
+            'q1':  {'1': 'q2',  '0': 'q8'},
+            'q3':  {'1': 'q5',  '0': 'q10'},
+
+            # Layer 2 -> layer 3 / steady state.
+            # At length 3 no string is yet accepted (trigger needs
+            # length >= 4), so length-3 strings drop into the steady
+            # suffix-tracking states (q4/q6/q7/q9) rather than '+'.
+            'q2':  {'1': 'q4',  '0': 'q6'},   # "11" + x
+            'q5':  {'1': 'q4',  '0': 'q6'},   # "01" + x
+            'q8':  {'1': 'q9',  '0': 'q7'},   # "10" + x
+            'q10': {'1': 'q9',  '0': 'q7'},   # "00" + x
+
+            # Steady-state suffix tracking. Completing a trigger
+            # (111, 101, or 000) jumps straight to the accept state.
+            'q4':  {'1': '+',   '0': 'q6'},   # suffix "11" : +1 = "111"
+            'q6':  {'1': '+',   '0': 'q7'},   # suffix "10" : +1 = "101"
+            'q7':  {'1': 'q9',  '0': '+'},    # suffix "00" : +0 = "000"
+            'q9':  {'1': 'q4',  '0': 'q6'},   # suffix "01" : never a trigger by itself
+
+            # Accept state with (1+0)* self-loop
+            '+':   {'1': '+',   '0': '+'},
         }
-        
+
         self._dfa = CustomDFA(states, alphabet, transitions, initial_state, final_states)
         self._state_count = len(states)
         self._states_warning = False
@@ -363,38 +403,85 @@ class AutomataEngine:
         ]
     
     def _build_expression2_pda(self):
-        """Build PDA for Expression 2 matching the user's flowchart diagram."""
+        """
+        Build the PDA flowchart for Expression 2 mirroring the
+        reference image: a Start oval, a tree of Read diamonds that
+        branches on the first symbol with a central Reject oval, a
+        long middle chain implementing (1+0+01)* and the
+        (111+000+101) trigger, and a final self-looping Read leading
+        into the Accept oval.
+
+        Expression: ((101+111+101)+(1+0+11))(1+0+01)*(111+000+101)(1+0)*
+        """
+        rd = lambda n: PDAState(n, 'read', '', 'Read')
+
         self._pda_states = [
-            PDAState('Start', 'start', 'Initial state'),
-            PDAState('Read1', 'decision', 'First read - branch on 0/1'),
-            PDAState('Reject', 'reject', 'Invalid path'),
-            PDAState('ReadL1', 'decision', 'Left branch (1 path)'),
-            PDAState('ReadL2', 'read', 'Continue 1 path'),
-            PDAState('ReadL3', 'read', 'Continue 1 path'),
-            PDAState('ReadR1', 'decision', 'Right branch (0 path)'),
-            PDAState('ReadM1', 'decision', 'Middle section'),
-            PDAState('ReadM2', 'read', 'Middle reads'),
-            PDAState('ReadM3', 'read', 'Middle reads'),
-            PDAState('ReadM4', 'read', 'Middle reads'),
-            PDAState('ReadF1', 'decision', 'Final pattern check'),
-            PDAState('Accept', 'accept', 'String accepted'),
+            PDAState('Start',  'start',  'Initial state', 'Start'),
+            rd('R0'),          # initial decision (1 vs 0)
+            PDAState('Reject', 'reject', 'Invalid path', 'Reject'),
+
+            # Two-level fan-out for the prefix
+            rd('L1'),          # left  (we read a '1')
+            rd('R1'),          # right (we read a '0')
+            rd('L2'),          # second '1' branch
+            rd('L3'),          # third  read on left branch
+            rd('R2'),          # right branch continuation
+
+            # Middle section: (1+0+01)* loop, drawn as two reads
+            # that share self-loops to spell the "01" alternative.
+            rd('M1'),
+            rd('M2'),
+
+            # (111+000+101) trigger — three sequential reads
+            rd('T1'),
+            rd('T2'),
+            rd('T3'),
+
+            # Trailing (1+0)* loop and accept
+            rd('F1'),
+            PDAState('Accept', 'accept', 'String accepted', 'Accept'),
         ]
-        
+
         self._pda_transitions = [
-            PDATransition('Start', 'Read1', 'ε', 'ε', 'Z'),
-            PDATransition('Read1', 'ReadL1', '1', 'ε', 'ε'),
-            PDATransition('Read1', 'ReadR1', '0', 'ε', 'ε'),
-            PDATransition('Read1', 'Reject', 'ε', 'ε', 'ε'),
-            PDATransition('ReadL1', 'ReadL2', '1', 'ε', 'ε'),
-            PDATransition('ReadL1', 'ReadR1', '0', 'ε', 'ε'),
-            PDATransition('ReadL2', 'ReadM1', '1', 'ε', 'ε'),
-            PDATransition('ReadR1', 'ReadM1', '1', 'ε', 'ε'),
-            PDATransition('ReadR1', 'ReadR1', '0', 'ε', 'ε'),
-            PDATransition('ReadM1', 'ReadM2', '0,1', 'ε', 'ε'),
-            PDATransition('ReadM2', 'ReadM3', '0,1', 'ε', 'ε'),
-            PDATransition('ReadM3', 'ReadF1', '0,1', 'ε', 'ε'),
-            PDATransition('ReadF1', 'ReadF1', '0,1', 'ε', 'ε'),
-            PDATransition('ReadF1', 'Accept', 'ε', 'Z', 'ε'),
+            PDATransition('Start', 'R0', 'ε', 'ε', 'Z'),
+
+            # First symbol fan-out (left = '1', right = '0')
+            PDATransition('R0', 'L1', '1', 'ε', 'ε'),
+            PDATransition('R0', 'R1', '0', 'ε', 'ε'),
+            # Visual dead-end arrow to Reject (mirrors the triangle
+            # shown going downward from the top Read in the image).
+            PDATransition('R0', 'Reject', 'ε', 'ε', 'ε'),
+
+            # Left branch  (prefixes 1, 11, 111, 101)
+            PDATransition('L1', 'L2', '1', 'ε', 'ε'),
+            PDATransition('L1', 'R2', '0', 'ε', 'ε'),
+            PDATransition('L2', 'L3', '1', 'ε', 'ε'),
+            PDATransition('L2', 'M1', '0', 'ε', 'ε'),
+            PDATransition('L3', 'M1', 'ε', 'ε', 'ε'),
+
+            # Right branch (prefix 0, 0...)
+            PDATransition('R1', 'R2', '0', 'ε', 'ε'),
+            PDATransition('R1', 'M1', '1', 'ε', 'ε'),
+            PDATransition('R2', 'M1', 'ε', 'ε', 'ε'),
+
+            # (1+0+01)* loop — single-symbol self-loops on M1,
+            # plus a two-step "01" cycle through M2 to mirror the
+            # extra Read node visible in the image.
+            PDATransition('M1', 'M1', '1',   'ε', 'ε'),
+            PDATransition('M1', 'M2', '0',   'ε', 'ε'),
+            PDATransition('M2', 'M1', '1',   'ε', 'ε'),
+            PDATransition('M2', 'M2', '0,1', 'ε', 'ε'),
+
+            # Enter the (111+000+101) trigger.
+            PDATransition('M1', 'T1', 'ε', 'ε', 'ε'),
+            PDATransition('M2', 'T1', 'ε', 'ε', 'ε'),
+            PDATransition('T1', 'T2', '0,1', 'ε', 'ε'),
+            PDATransition('T2', 'T3', '0,1', 'ε', 'ε'),
+            PDATransition('T3', 'F1', '0,1', 'ε', 'ε'),
+
+            # Trailing (1+0)* loop, then accept.
+            PDATransition('F1', 'F1', '0,1', 'ε', 'ε'),
+            PDATransition('F1', 'Accept', 'ε', 'Z', 'ε'),
         ]
 
     def _regex_to_cfg(self, regex: str) -> list[CFGRule]:

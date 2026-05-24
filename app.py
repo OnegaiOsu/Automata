@@ -84,7 +84,8 @@ def get_automaton():
         {"left": r.left, "right": list(r.right)} for r in engine.get_cfg_rules()
     ]
     pda_states = [
-        {"name": s.name, "state_type": s.state_type, "description": s.description}
+        {"name": s.name, "state_type": s.state_type,
+         "description": s.description, "label": s.label or s.name}
         for s in engine.get_pda_states()
     ]
     pda_transitions = [
