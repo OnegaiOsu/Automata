@@ -26,6 +26,13 @@ class TransitionStep:
     stack_before: list[str] = field(default_factory=list)  # For PDA
     stack_after: list[str] = field(default_factory=list)   # For PDA
     pda_action: str = ""  # Description of PDA action
+@dataclass
+class CFGStep:
+    """Represents a single step in a CFG derivation."""
+    current_string: str
+    rule_left: str
+    rule_right: str
+    step_number: int
 
 
 @dataclass
@@ -864,3 +871,90 @@ class AutomataEngine:
                 return False, "String rejected by the automaton"
         except Exception as e:
             return False, f"Error: {str(e)}"
+
+    def process_string_cfg(self, input_string: str) -> ProcessingResult:
+        """
+        Process the string using the CFG by finding a leftmost derivation.
+        Returns a sequence of CFGStep objects.
+        """
+        if not self._cfg_rules:
+            return ProcessingResult(False, [], "", "No CFG rules generated.")
+            
+        # Quick check if it's even accepted by the language (using DFA)
+        valid, msg = self.validate_string(input_string)
+        if not valid:
+            return ProcessingResult(False, [], "", msg)
+
+        # Build rule dictionary
+        rule_map = {}
+        for rule in self._cfg_rules:
+            if rule.left not in rule_map:
+                rule_map[rule.left] = []
+            rule_map[rule.left].extend(rule.right)
+            
+        def dfs(current_str: str, target: str, step_num: int, path: list) -> bool:
+            # Find the first non-terminal
+            first_nt_idx = -1
+            for i, char in enumerate(current_str):
+                if char in rule_map:
+                    first_nt_idx = i
+                    break
+                    
+            if first_nt_idx == -1:
+                # No non-terminals left, string must match target exactly
+                return current_str == target
+                
+            # Quick fail: if the prefix of terminals doesn't match the target, backtrack
+            prefix = current_str[:first_nt_idx]
+            if not target.startswith(prefix):
+                return False
+                
+            # If the current string without nonterminals is longer than target, it will never match
+            # (since our CFG doesn't have rules that erase terminals)
+            terminals_only = "".join(c for c in current_str if c not in rule_map)
+            if len(terminals_only) > len(target):
+                return False
+
+            nt = current_str[first_nt_idx]
+            
+            # Try all productions for this non-terminal
+            for right in rule_map[nt]:
+                expansion = "" if right == "ε" else right
+                next_str = current_str[:first_nt_idx] + expansion + current_str[first_nt_idx+1:]
+                
+                step = CFGStep(
+                    current_string=current_str,
+                    rule_left=nt,
+                    rule_right=right,
+                    step_number=step_num
+                )
+                path.append(step)
+                
+                if dfs(next_str, target, step_num + 1, path):
+                    return True
+                    
+                path.pop()
+                
+            return False
+
+        path = []
+        # Find the start symbol (usually 'S' or the left side of the first rule)
+        start_symbol = 'S' if 'S' in rule_map else self._cfg_rules[0].left
+        
+        success = dfs(start_symbol, input_string, 1, path)
+        
+        # Add a final step showing the fully derived string if successful
+        if success:
+            path.append(CFGStep(
+                current_string=input_string,
+                rule_left="",
+                rule_right="",
+                step_number=len(path) + 1
+            ))
+            
+        return ProcessingResult(
+            accepted=success,
+            steps=path,
+            final_state="Accept" if success else "Reject",
+            error_message=None if success else "Could not find a valid CFG derivation."
+        )

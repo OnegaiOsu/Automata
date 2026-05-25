@@ -135,6 +135,20 @@ async function renderDFA(dot) {
   container.appendChild(svg);
 }
 
+async function renderDotToContainer(dot, containerId) {
+  const container = $(containerId);
+  if (!container) return;
+  try {
+    const viz = await getViz();
+    const svg = viz.renderSVGElement(dot);
+    applyDarkThemeSVG(svg);
+    container.innerHTML = '';
+    container.appendChild(svg);
+  } catch(e) {
+    console.error(e);
+  }
+}
+
 function buildPdaDot(pda) {
   const borderColor = {
     start:    '#89b4fa',
@@ -259,6 +273,80 @@ function buildCfgDot(rules) {
     expand('S', 0, 3);
   }
   
+  lines.push('}');
+  return lines.join('\n');
+}
+
+function buildDerivationDot(steps, currentIdx) {
+  let nodeCounter = 0;
+  const lines = [
+    'digraph CFGTree {',
+    '  bgcolor="transparent";',
+    '  rankdir=TB;',
+    '  node [shape=none, fontname="Helvetica", fontsize=14, margin=0];',
+    '  edge [color="#6c7086"];',
+  ];
+
+  // We maintain a tree structure: { id, symbol, children: [], isTerminal }
+  const root = { id: `node${nodeCounter++}`, symbol: 'S', children: [], isTerminal: false };
+  
+  function getLeftmostNonTerminal(node) {
+    if (!node.isTerminal && node.children.length === 0 && node.symbol !== 'ε') {
+      return node;
+    }
+    for (const child of node.children) {
+      const found = getLeftmostNonTerminal(child);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  for (let s = 0; s <= currentIdx; s++) {
+    const step = steps[s];
+    if (!step.rule_left) continue; // Final accept step has no rule
+    
+    const targetNode = getLeftmostNonTerminal(root);
+    if (!targetNode) break;
+
+    const right = step.rule_right;
+    let i = 0;
+    while (i < right.length) {
+      let char = right[i];
+      if (char === 'ε') {
+        targetNode.children.push({ id: `node${nodeCounter++}`, symbol: 'ε', children: [], isTerminal: true });
+        i++;
+      } else if (char >= 'A' && char <= 'Z') {
+        let varName = char;
+        let j = i + 1;
+        while (j < right.length && right[j] >= '0' && right[j] <= '9') {
+          varName += right[j];
+          j++;
+        }
+        targetNode.children.push({ id: `node${nodeCounter++}`, symbol: varName, children: [], isTerminal: false });
+        i = j;
+      } else {
+        targetNode.children.push({ id: `node${nodeCounter++}`, symbol: char, children: [], isTerminal: true });
+        i++;
+      }
+    }
+  }
+
+  function emit(node, isNewlyExpanded) {
+    const isEpsilon = (node.symbol === 'ε');
+    let color = isEpsilon ? '#cba6f7' : (node.isTerminal ? '#a6e3a1' : '#89b4fa');
+    let highlight = isNewlyExpanded ? 'bgcolor="#a6e3a1" color="#1e1e2e"' : '';
+    
+    lines.push(`  ${node.id} [label=<<font color="${color}" ${highlight}><b>${node.symbol}</b></font>>];`);
+    
+    for (const child of node.children) {
+      emit(child, isNewlyExpanded ? false : (node === getLeftmostNonTerminal(root))); // Not perfectly highlighting the active node, but we can just emit everything
+      lines.push(`  ${node.id} -> ${child.id};`);
+    }
+  }
+
+  // To highlight the actively expanded node, we could find the one expanded at currentIdx, but simple render is fine for now
+  emit(root, false);
+
   lines.push('}');
   return lines.join('\n');
 }
@@ -406,14 +494,22 @@ function renderStack(symbols, highlightKind) {
 }
 
 function renderTrace(panelId, steps, currentIdx) {
-  const el = $(panelId === 'view-dfa' ? 'dfa-trace' : 'pda-trace');
+  const el = $(panelId === 'view-dfa' ? 'dfa-trace' : (panelId === 'view-cfg' ? 'cfg-trace' : 'pda-trace'));
   el.innerHTML = '';
   steps.forEach((s, i) => {
     const div = document.createElement('div');
     div.className = 'step' + (i === currentIdx ? ' current' : '');
-    let line = `${String(s.step_number).padStart(2, ' ')}.  ${s.from_state}  --${s.symbol}-->  ${s.to_state}`;
-    if (s.pda_action) line += `   [${s.pda_action}]`;
-    div.textContent = line;
+    
+    if (s.rule_left !== undefined) {
+      // CFG trace
+      div.textContent = `${String(s.step_number).padStart(2, ' ')}. ${s.rule_left ? (s.rule_left + ' -> ' + s.rule_right) : 'Matched!'}   (Current: ${s.current_string})`;
+    } else {
+      // DFA / PDA trace
+      let line = `${String(s.step_number).padStart(2, ' ')}.  ${s.from_state}  --${s.symbol}-->  ${s.to_state}`;
+      if (s.pda_action) line += `   [${s.pda_action}]`;
+      div.textContent = line;
+    }
+    
     el.appendChild(div);
   });
 }
@@ -425,8 +521,13 @@ function resetRun() {
   stopPlaying();
   clearHighlights('#dfa-graph');
   clearHighlights('#pda-graph');
+  if (state.automaton && state.automaton.cfg) {
+    const dot = buildCfgDot(state.automaton.cfg.rules);
+    renderDotToContainer(dot, 'cfg-graph');
+  }
   renderTrace('view-dfa', [], -1);
   renderTrace('view-pda', [], -1);
+  renderTrace('view-cfg', [], -1);
   renderStack(['Z'], null);
   setResult('', '');
   
@@ -464,6 +565,10 @@ function applyStep(idx) {
       }
     }
     renderTrace('view-pda', state.steps, idx);
+  } else if (state.mode === 'cfg') {
+    const dot = buildDerivationDot(state.steps, idx);
+    renderDotToContainer(dot, 'cfg-graph');
+    renderTrace('view-cfg', state.steps, idx);
   } else {
     highlightStep('dfa-graph', step, prev);
     renderTrace('view-dfa', state.steps, idx);
@@ -522,7 +627,7 @@ async function loadExpression(name) {
 }
 
 function switchView(view) {
-  state.mode = view === 'pda' ? 'pda' : (view === 'dfa' ? 'dfa' : state.mode);
+  state.mode = view;
   document.querySelectorAll('.view-btn').forEach(b =>
     b.classList.toggle('active', b.dataset.view === view));
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
@@ -531,10 +636,13 @@ function switchView(view) {
 
 async function onTest() {
   const input = $('input').value.trim();
-  if (!input) { setResult('Enter a string', 'rejected'); return; }
+  if (!input && input.toLowerCase() !== "null" && input !== "ε") { setResult('Enter a string', 'rejected'); return; }
   // Determine which mode is active based on currently visible panel.
   const activePanel = document.querySelector('.panel.active').id;
-  const mode = activePanel === 'view-pda' ? 'pda' : 'dfa';
+  let mode = 'dfa';
+  if (activePanel === 'view-pda') mode = 'pda';
+  else if (activePanel === 'view-cfg') mode = 'cfg';
+  
   state.mode = mode;
   state.lastInput = input;
   resetRun();
@@ -546,7 +654,7 @@ async function onTest() {
     return;
   }
   state.steps = res.steps;
-  if (mode === 'cfg' || !state.steps.length) {
+  if (!state.steps.length) {
     announceResult();
   } else {
     play(activePanel);
@@ -575,6 +683,10 @@ async function init() {
   btn('dfa-stop', stopPlaying);
   btn('dfa-step', () => { state.mode = 'dfa'; stepOnce(); });
   btn('dfa-reset', resetRun);
+  btn('cfg-play', () => { state.mode = 'cfg'; play('view-cfg'); });
+  btn('cfg-stop', stopPlaying);
+  btn('cfg-step', () => { state.mode = 'cfg'; stepOnce(); });
+  btn('cfg-reset', resetRun);
   btn('pda-play', () => { state.mode = 'pda'; play('view-pda'); });
   btn('pda-stop', stopPlaying);
   btn('pda-step', () => { state.mode = 'pda'; stepOnce(); });

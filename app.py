@@ -19,6 +19,7 @@ from core.automata_engine import AutomataEngine
 
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
+app.config["TEMPLATES_AUTO_RELOAD"] = True
 
 # Allow the frontend to call the API from Cloudflare Pages or local dev.
 cors_raw = os.environ.get("CORS_ORIGINS", "*")
@@ -37,6 +38,13 @@ def _engine_for(expression_name: str) -> AutomataEngine:
 
 
 def _serialize_step(step) -> dict:
+    if hasattr(step, "current_string"):
+        return {
+            "current_string": step.current_string,
+            "rule_left": step.rule_left,
+            "rule_right": step.rule_right,
+            "step_number": step.step_number,
+        }
     return {
         "from_state": step.from_state,
         "symbol": step.symbol,
@@ -128,6 +136,9 @@ def process_string():
     input_string = body.get("input", "")
     mode = body.get("mode", "dfa").lower()
 
+    if input_string.lower() == "null" or input_string == "ε":
+        input_string = ""
+
     try:
         engine = _engine_for(expression_name)
     except ValueError as exc:
@@ -146,6 +157,8 @@ def process_string():
 
     if mode == "pda":
         result = engine.process_string_pda(input_string)
+    elif mode == "cfg":
+        result = engine.process_string_cfg(input_string)
     else:
         result = engine.process_string_dfa(input_string)
 
@@ -165,6 +178,4 @@ def healthz():
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    debug = os.environ.get("FLASK_DEBUG", "0") == "1"
-    app.run(host="0.0.0.0", port=port, debug=debug)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=True)
