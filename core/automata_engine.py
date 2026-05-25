@@ -747,8 +747,13 @@ class AutomataEngine:
         
         steps = []
         current_state = self._dfa.initial_state
-        stack = ['Z']  # Initial stack symbol
-        
+        # The PDA visualization pushes the bottom-of-stack marker 'Z' on
+        # the ε-transition from Start before any input is consumed, and
+        # pops it on the ε-transition into Accept after all input has
+        # been consumed. No input-driven transition touches the stack,
+        # so the stack stays [Z] for every per-symbol step.
+        stack = ['Z']
+
         for i, symbol in enumerate(input_string):
             if current_state not in self._dfa.transitions:
                 return ProcessingResult(
@@ -757,7 +762,7 @@ class AutomataEngine:
                     final_state=current_state,
                     error_message=f"No transitions from state {current_state}"
                 )
-            
+
             if symbol not in self._dfa.transitions[current_state]:
                 return ProcessingResult(
                     accepted=False,
@@ -765,28 +770,12 @@ class AutomataEngine:
                     final_state=current_state,
                     error_message=f"No transition for symbol '{symbol}' from state {current_state}"
                 )
-            
+
             next_state = self._dfa.transitions[current_state][symbol]
             stack_before = stack.copy()
-            
-            # Generate meaningful stack operations for educational purposes
-            # Push symbol marker when entering key states, pop when leaving
-            stack_action = ""
-            if i == 0:
-                # First symbol - push marker
-                stack.append(symbol.upper())
-                stack_action = f"Push {symbol.upper()}"
-            elif next_state in self._dfa.final_states:
-                # Approaching final state - pop to accept
-                if len(stack) > 1:
-                    popped = stack.pop()
-                    stack_action = f"Pop {popped}"
-            else:
-                # Regular transition - optionally track progress
-                if len(stack) < 5:  # Limit stack depth
-                    stack.append(symbol.upper())
-                    stack_action = f"Push {symbol.upper()}"
-            
+
+            # Input-driven transitions in the diagrams are all ε,ε → ε,
+            # so the stack does not change while reading a symbol.
             steps.append(TransitionStep(
                 from_state=current_state,
                 symbol=symbol,
@@ -794,10 +783,10 @@ class AutomataEngine:
                 step_number=i + 1,
                 stack_before=stack_before,
                 stack_after=stack.copy(),
-                pda_action=stack_action
+                pda_action=""
             ))
             current_state = next_state
-        
+
         accepted = current_state in self._dfa.final_states
         return ProcessingResult(
             accepted=accepted,
