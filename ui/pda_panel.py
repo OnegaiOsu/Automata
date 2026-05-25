@@ -46,6 +46,8 @@ class EllipseNode(FlowchartNode):
     
     def __init__(self, x: float, y: float, text: str, node_type: str):
         super().__init__(x, y, text, node_type)
+        self._default_pen = None
+        self._default_brush = None
     
     def create_item(self, scene: QGraphicsScene):
         # Choose color based on node type
@@ -62,11 +64,14 @@ class EllipseNode(FlowchartNode):
             pen_color = "#89b4fa"
             fill_color = "#313244"
         
+        self._default_pen = QPen(QColor(pen_color), 2)
+        self._default_brush = QBrush(QColor(fill_color))
+
         self.item = scene.addEllipse(
             self.x - self.WIDTH/2, self.y - self.HEIGHT/2,
             self.WIDTH, self.HEIGHT,
-            QPen(QColor(pen_color), 2),
-            QBrush(QColor(fill_color))
+            self._default_pen,
+            self._default_brush
         )
         
         # Add text label
@@ -78,6 +83,18 @@ class EllipseNode(FlowchartNode):
         
         return self.item
 
+    def highlight(self):
+        """Highlight this node as the active state."""
+        if self.item is not None:
+            self.item.setPen(QPen(QColor("#f9e2af"), 4))
+            self.item.setBrush(QBrush(QColor("#45475a")))
+
+    def reset_appearance(self):
+        """Restore default colors."""
+        if self.item is not None and self._default_pen is not None:
+            self.item.setPen(self._default_pen)
+            self.item.setBrush(self._default_brush)
+
 
 class DiamondNode(FlowchartNode):
     """Diamond node for decision/Read states."""
@@ -86,6 +103,8 @@ class DiamondNode(FlowchartNode):
     
     def __init__(self, x: float, y: float, text: str, node_type: str = 'decision'):
         super().__init__(x, y, text, node_type)
+        self._default_pen = QPen(QColor("#89b4fa"), 2)
+        self._default_brush = QBrush(QColor("#313244"))
     
     def create_item(self, scene: QGraphicsScene):
         # Create diamond shape
@@ -99,8 +118,8 @@ class DiamondNode(FlowchartNode):
         
         self.item = scene.addPolygon(
             polygon,
-            QPen(QColor("#89b4fa"), 2),
-            QBrush(QColor("#313244"))
+            self._default_pen,
+            self._default_brush
         )
         
         # Add text label
@@ -111,6 +130,18 @@ class DiamondNode(FlowchartNode):
         self.label.setPos(self.x - rect.width()/2, self.y - rect.height()/2)
         
         return self.item
+
+    def highlight(self):
+        """Highlight this node as the active state."""
+        if self.item is not None:
+            self.item.setPen(QPen(QColor("#f9e2af"), 4))
+            self.item.setBrush(QBrush(QColor("#45475a")))
+
+    def reset_appearance(self):
+        """Restore default colors."""
+        if self.item is not None:
+            self.item.setPen(self._default_pen)
+            self.item.setBrush(self._default_brush)
 
 
 class StackSymbol(QGraphicsRectItem):
@@ -278,6 +309,7 @@ class PDAPanel(QWidget):
         self._animation_timer.timeout.connect(self._animation_tick)
         self._animation_frame = 0
         self._is_animating = False
+        self._diagram_nodes: dict[str, FlowchartNode] = {}
         
         self._setup_ui()
     
@@ -429,7 +461,7 @@ class PDAPanel(QWidget):
         """Build flowchart-style PDA diagram matching the user's design."""
         self.state_scene.clear()
         self._flowchart_nodes = {}
-        
+        self._diagram_nodes: dict[str, FlowchartNode] = {}
         data = self.engine.get_dfa_graph_data()
         if not data:
             text = self.state_scene.addText("No PDA loaded. Select an expression above.")
@@ -454,6 +486,59 @@ class PDAPanel(QWidget):
             self.state_scene.sceneRect().adjusted(-30, -30, 30, 30),
             Qt.AspectRatioMode.KeepAspectRatio
         )
+
+    # DFA state -> flowchart node key, used to drive highlighting on
+    # the PDA diagram during step-by-step processing.
+    _EXPR1_STATE_TO_NODE = {
+        '-':  'Read1',
+        'q1': 'ReadA1',
+        'q2': 'ReadB1',
+        'q3': 'ReadA2',
+        'q4': 'ReadB2',
+        'T':  'Reject',
+        'q5': 'ReadLoop',
+        'q6': 'ReadBab1',
+        'q7': 'ReadBab2',
+        'q8': 'ReadBab3',
+        '+':  'ReadFinal',
+    }
+
+    _EXPR2_STATE_TO_NODE = {
+        '-':   'Read1',
+        'q1':  'ReadR1',
+        'q3':  'ReadL1',
+        'q2':  'ReadR2',
+        'q5':  'ReadR2',
+        'q8':  'ReadL1',
+        'q10': 'ReadL1',
+        'q4':  'ReadLoop',
+        'q6':  'ReadLoop',
+        'q7':  'ReadLoop',
+        'q9':  'ReadLoop',
+        '+':   'ReadP3',
+    }
+
+    def _state_to_node_key(self, state: str) -> Optional[str]:
+        """Map a DFA state name to the flowchart node key for the active expression."""
+        current_expr = getattr(self.engine, '_current_expression_key', '') or ''
+        mapping = (self._EXPR2_STATE_TO_NODE if '0,1' in current_expr
+                   else self._EXPR1_STATE_TO_NODE)
+        return mapping.get(str(state))
+
+    def _highlight_state(self, state: str, *, accept_final: bool = False):
+        """Reset all flowchart nodes and highlight the one for `state`."""
+        for node in self._diagram_nodes.values():
+            node.reset_appearance()
+        key = self._state_to_node_key(state)
+        if key and key in self._diagram_nodes:
+            self._diagram_nodes[key].highlight()
+        if accept_final and 'Accept' in self._diagram_nodes:
+            self._diagram_nodes['Accept'].highlight()
+
+    def _reset_diagram_highlights(self):
+        """Clear all flowchart highlights."""
+        for node in self._diagram_nodes.values():
+            node.reset_appearance()
     
     def _build_expression1_flowchart(self):
         """Build flowchart for Expression 1 (a,b)."""
@@ -468,12 +553,14 @@ class PDAPanel(QWidget):
         start_node = EllipseNode(cx, y, "Start", "start")
         start_node.create_item(self.state_scene)
         self._flowchart_nodes['Start'] = (cx, y)
+        self._diagram_nodes['Start'] = start_node
         y += y_spacing
         
         # First decision: Read input for (aba+bab)
         read1 = DiamondNode(cx, y, "Read", "decision")
         read1.create_item(self.state_scene)
         self._flowchart_nodes['Read1'] = (cx, y)
+        self._diagram_nodes['Read1'] = read1
         self._draw_arrow(cx, y - y_spacing + 20, cx, y - 25, "")
         
         # Branch labels
@@ -489,11 +576,13 @@ class PDAPanel(QWidget):
         # Left branch (b path - bab)
         read_b1 = DiamondNode(left_x, y, "Read", "decision")
         read_b1.create_item(self.state_scene)
+        self._diagram_nodes['ReadB1'] = read_b1
         self._draw_arrow(cx - 25, y - y_spacing, left_x, y - 25, "")
         
         # Right branch (a path - aba)  
         read_a1 = DiamondNode(right_x, y, "Read", "decision")
         read_a1.create_item(self.state_scene)
+        self._diagram_nodes['ReadA1'] = read_a1
         self._draw_arrow(cx + 25, y - y_spacing, right_x, y - 25, "")
         
         y += y_spacing
@@ -501,18 +590,22 @@ class PDAPanel(QWidget):
         # Reject state in middle
         reject = EllipseNode(cx, y, "Reject", "reject")
         reject.create_item(self.state_scene)
+        self._diagram_nodes['Reject'] = reject
         self._draw_arrow(left_x + 20, y - y_spacing + 20, cx - 30, y - 15, "b")
         self._draw_arrow(right_x - 20, y - y_spacing + 20, cx + 30, y - 15, "a")
         
         # Continue paths
         read_b2 = DiamondNode(left_x, y, "Read", "decision")
         read_a2 = DiamondNode(right_x, y, "Read", "decision")
+        self._diagram_nodes['ReadB2'] = read_b2
+        self._diagram_nodes['ReadA2'] = read_a2
         
         y += y_spacing
         
         # Paths converge for (a+b)*
         read_loop = DiamondNode(cx, y, "Read", "decision")
         read_loop.create_item(self.state_scene)
+        self._diagram_nodes['ReadLoop'] = read_loop
         self._draw_arrow(left_x, y - y_spacing + 25, cx - 20, y - 25, "a")
         self._draw_arrow(right_x, y - y_spacing + 25, cx + 20, y - 25, "b")
         
@@ -524,16 +617,19 @@ class PDAPanel(QWidget):
         # Looking for bab pattern
         read_bab1 = DiamondNode(cx, y, "Read", "decision")
         read_bab1.create_item(self.state_scene)
+        self._diagram_nodes['ReadBab1'] = read_bab1
         self._draw_arrow(cx, y - y_spacing + 25, cx, y - 25, "b")
         
         y += y_spacing
         read_bab2 = DiamondNode(cx, y, "Read", "decision")
         read_bab2.create_item(self.state_scene)
+        self._diagram_nodes['ReadBab2'] = read_bab2
         self._draw_arrow(cx, y - y_spacing + 25, cx, y - 25, "a")
         
         y += y_spacing
         read_bab3 = DiamondNode(cx, y, "Read", "decision")
         read_bab3.create_item(self.state_scene)
+        self._diagram_nodes['ReadBab3'] = read_bab3
         self._draw_arrow(cx, y - y_spacing + 25, cx, y - 25, "b")
         
         # Another (a+b)* loop
@@ -544,6 +640,7 @@ class PDAPanel(QWidget):
         # Final read for (a+b+ab+ba)
         read_final = DiamondNode(cx, y, "Read", "decision")
         read_final.create_item(self.state_scene)
+        self._diagram_nodes['ReadFinal'] = read_final
         self._draw_arrow(cx, y - y_spacing + 25, cx, y - 25, "a,b")
         
         # Self-loop for (a+b+aa)*
@@ -554,6 +651,7 @@ class PDAPanel(QWidget):
         # Accept node
         accept = EllipseNode(cx, y, "Accept", "accept")
         accept.create_item(self.state_scene)
+        self._diagram_nodes['Accept'] = accept
         self._draw_arrow(cx, y - y_spacing + 25, cx, y - 20, "")
     
     def _build_expression2_flowchart(self):
@@ -569,11 +667,13 @@ class PDAPanel(QWidget):
         start_node = EllipseNode(cx, y, "Start", "start")
         start_node.create_item(self.state_scene)
         self._flowchart_nodes['Start'] = (cx, y)
+        self._diagram_nodes['Start'] = start_node
         y += y_spacing
         
         # First Read - branch on 0 or 1
         read1 = DiamondNode(cx, y, "Read", "decision")
         read1.create_item(self.state_scene)
+        self._diagram_nodes['Read1'] = read1
         self._draw_arrow(cx, y - y_spacing + 20, cx, y - 25, "")
         self._draw_text(cx - 50, y - 10, "0")
         self._draw_text(cx + 40, y - 10, "1")
@@ -585,11 +685,13 @@ class PDAPanel(QWidget):
         # Left branch (0 path)
         read_l1 = DiamondNode(left_x, y, "Read", "decision")
         read_l1.create_item(self.state_scene)
+        self._diagram_nodes['ReadL1'] = read_l1
         self._draw_arrow(cx - 25, y - y_spacing, left_x, y - 25, "")
         
         # Right branch (1 path)
         read_r1 = DiamondNode(right_x, y, "Read", "decision")
         read_r1.create_item(self.state_scene)
+        self._diagram_nodes['ReadR1'] = read_r1
         self._draw_arrow(cx + 25, y - y_spacing, right_x, y - 25, "")
         
         # 0 path self-loop
@@ -600,11 +702,13 @@ class PDAPanel(QWidget):
         # Reject state in middle
         reject = EllipseNode(cx, y, "Reject", "reject")
         reject.create_item(self.state_scene)
+        self._diagram_nodes['Reject'] = reject
         self._draw_arrow(left_x + 20, y - y_spacing + 20, cx - 30, y - 15, "ε")
         
         # Right continues to Read2
         read_r2 = DiamondNode(right_x, y, "Read", "decision")
         read_r2.create_item(self.state_scene)
+        self._diagram_nodes['ReadR2'] = read_r2
         self._draw_arrow(right_x, y - y_spacing + 25, right_x, y - 25, "1")
         
         y += y_spacing
@@ -612,6 +716,7 @@ class PDAPanel(QWidget):
         # Middle section - loop state
         read_loop = DiamondNode(cx, y, "Read", "decision")
         read_loop.create_item(self.state_scene)
+        self._diagram_nodes['ReadLoop'] = read_loop
         self._draw_arrow(left_x, y - y_spacing - 70 + 25, cx - 20, y - 25, "1")
         self._draw_arrow(right_x, y - y_spacing + 25, cx + 20, y - 25, "1")
         
@@ -623,16 +728,19 @@ class PDAPanel(QWidget):
         # Pattern detection section (111+000+101)
         read_p1 = DiamondNode(cx, y, "Read", "decision")
         read_p1.create_item(self.state_scene)
+        self._diagram_nodes['ReadP1'] = read_p1
         self._draw_arrow(cx, y - y_spacing + 25, cx, y - 25, "0,1")
         
         y += y_spacing
         read_p2 = DiamondNode(cx, y, "Read", "decision")
         read_p2.create_item(self.state_scene)
+        self._diagram_nodes['ReadP2'] = read_p2
         self._draw_arrow(cx, y - y_spacing + 25, cx, y - 25, "0,1")
         
         y += y_spacing
         read_p3 = DiamondNode(cx, y, "Read", "decision")
         read_p3.create_item(self.state_scene)
+        self._diagram_nodes['ReadP3'] = read_p3
         self._draw_arrow(cx, y - y_spacing + 25, cx, y - 25, "0,1")
         
         # (1+0)* loop
@@ -643,6 +751,7 @@ class PDAPanel(QWidget):
         # Accept node
         accept = EllipseNode(cx, y, "Accept", "accept")
         accept.create_item(self.state_scene)
+        self._diagram_nodes['Accept'] = accept
         self._draw_arrow(cx, y - y_spacing + 25, cx, y - 20, "")
     
     def _draw_loop_left(self, cx: float, cy: float, label: str):
@@ -781,6 +890,7 @@ class PDAPanel(QWidget):
         if self.engine.get_dfa_graph_data():
             initial = self.engine.get_dfa_graph_data()['initial_state']
             self.current_state_label.setText(f"Current State: {initial}")
+            self._highlight_state(initial)
     
     def _on_play(self):
         """Start continuous animation."""
@@ -835,6 +945,7 @@ class PDAPanel(QWidget):
         self.current_state_label.setStyleSheet(
             "background-color: #313244; padding: 8px; border-radius: 4px; font-weight: bold;"
         )
+        self._reset_diagram_highlights()
         self.transition_label.setText("δ(state, input, stack_top) → (new_state, stack_operation)")
         self.transition_label.setStyleSheet(
             "font-family: 'Cascadia Code'; font-size: 13px; padding: 10px;"
@@ -867,6 +978,9 @@ class PDAPanel(QWidget):
         """Execute a single transition step."""
         # Update current state
         self.current_state_label.setText(f"Current State: {step.to_state}")
+
+        # Highlight the corresponding flowchart node
+        self._highlight_state(step.to_state)
         
         # Update stack visualization
         self.stack_view.set_stack(step.stack_after)
@@ -950,6 +1064,10 @@ class PDAPanel(QWidget):
                     '<span style="color: #a6e3a1; font-weight: bold;">'
                     '✓ STRING ACCEPTED</span>'
                 )
+                # Highlight the final state and accept node on the diagram
+                self._highlight_state(
+                    self._current_result.final_state, accept_final=True
+                )
             else:
                 self.current_state_label.setStyleSheet(
                     "background-color: #3a1e2f; padding: 8px; border-radius: 4px; "
@@ -959,6 +1077,7 @@ class PDAPanel(QWidget):
                     '<span style="color: #f38ba8; font-weight: bold;">'
                     '✗ STRING REJECTED</span>'
                 )
+                self._highlight_state(self._current_result.final_state)
             
             self.animation_finished.emit(self._current_result.accepted)
     
