@@ -152,7 +152,8 @@ class CFGPanel(QWidget):
         
         self.rules_text = QTextEdit()
         self.rules_text.setReadOnly(True)
-        self.rules_text.setFont(QFont("Cascadia Code", 13))
+        self.rules_text.setFont(QFont("Cascadia Code", 16))
+        self.rules_text.setStyleSheet("line-height: 200%;")
         self.rules_text.setMinimumHeight(120)
         
         # Apply syntax highlighter
@@ -206,7 +207,23 @@ class CFGPanel(QWidget):
     def update_grammar(self):
         """Update the displayed grammar and derivation tree from the engine."""
         cfg_text = self.engine.get_cfg_text()
-        self.rules_text.setPlainText(cfg_text)
+        
+        # Remove the metadata headers if any to match reference exactly
+        lines = cfg_text.split('\n')
+        clean_lines = []
+        for line in lines:
+            if line.startswith('=') or line.startswith('Context') or line.startswith('Start') or line.startswith('Terminal'):
+                continue
+            
+            # Format arrows to be like reference (space around arrow)
+            if '→' in line:
+                line = line.replace('→', '->')
+            
+            if line.strip():
+                clean_lines.append(line)
+        
+        formatted_text = "\n\n".join(clean_lines)
+        self.rules_text.setPlainText(formatted_text)
         self._build_derivation_tree()
     
     def _build_derivation_tree(self):

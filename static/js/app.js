@@ -10,6 +10,37 @@ const state = {
   stepIndex: -1,        // currently highlighted step
   playing: false,
   timer: null,
+  lastInput: '',        // saved input for trace display
+};
+
+const EXPR1_STATE_TO_NODE = {
+  '-':  'R0',
+  'q1': 'RR1',
+  'q2': 'RL1',
+  'q3': 'RR2',
+  'q4': 'RL2',
+  'T':  'Reject',
+  'q5': 'L1A', 
+  'q6': 'B1',
+  'q7': 'B2',
+  'q8': 'B3',
+  '+':  'Accept',
+};
+
+const EXPR2_STATE_TO_NODE = {
+  '-': 'R0',
+  'q1': 'L1',
+  'q3': 'R1',
+  'q2': 'L2',
+  'q8': 'R2',
+  'q10': 'R2',
+  'q5': 'M1',
+  'q6': 'M2',
+  'q4': 'L3',
+  'q7': 'T1',
+  'q9': 'M1',
+  '+': 'Accept',
+  'T': 'Reject'
 };
 
 function getApiBase() {
@@ -158,21 +189,97 @@ function buildPdaDot(pda) {
   return lines.join('\n');
 }
 
-async function renderPDA(pda) {
+function renderPDA(pda) {
   const container = $('pda-graph');
-  container.innerHTML = '<span style="color:#6c7086">Rendering…</span>';
-  const viz = await getViz();
-  const svg = viz.renderSVGElement(buildPdaDot(pda));
-  applyDarkThemeSVG(svg);
+  const isExpr2 = state.current && state.current.name.includes('0,1');
+  const svg = renderPDASvg(isExpr2);
   container.innerHTML = '';
   container.appendChild(svg);
   // Always start at the top of tall PDA diagrams
   container.scrollTop = 0;
 }
 
-function renderCFG(text) {
+function buildCfgDot(rules) {
+  const ruleMap = {};
+  for (const r of rules) {
+    if (!ruleMap[r.left]) ruleMap[r.left] = [];
+    ruleMap[r.left].push(...r.right);
+  }
+  
+  let nodeCounter = 0;
+  const lines = [
+    'digraph CFGTree {',
+    '  bgcolor="transparent";',
+    '  rankdir=TB;',
+    '  node [shape=none, fontname="Helvetica", fontsize=14, margin=0];',
+    '  edge [color="#6c7086"];',
+  ];
+  
+  function expand(symbol, currentDepth, maxDepth) {
+    const nodeId = `node${nodeCounter++}`;
+    const isTerminal = !(symbol in ruleMap);
+    const isEpsilon = (symbol === 'ε');
+    
+    let color = isEpsilon ? '#cba6f7' : (isTerminal ? '#a6e3a1' : '#89b4fa');
+    let fontWeight = (isTerminal || isEpsilon) ? '' : ' bold';
+    
+    lines.push(`  ${nodeId} [label=<<font color="${color}"><b>${symbol}</b></font>>];`);
+    
+    if (!isTerminal && currentDepth < maxDepth) {
+      const production = ruleMap[symbol][0];
+      let childrenIds = [];
+      let i = 0;
+      while (i < production.length) {
+        let char = production[i];
+        if (char === 'ε') {
+          childrenIds.push(expand('ε', currentDepth + 1, maxDepth));
+          i++;
+        } else if (char >= 'A' && char <= 'Z') {
+          let varName = char;
+          let j = i + 1;
+          while (j < production.length && production[j] >= '0' && production[j] <= '9') {
+            varName += production[j];
+            j++;
+          }
+          childrenIds.push(expand(varName, currentDepth + 1, maxDepth));
+          i = j;
+        } else {
+          childrenIds.push(expand(char, currentDepth + 1, maxDepth));
+          i++;
+        }
+      }
+      for (const childId of childrenIds) {
+        lines.push(`  ${nodeId} -> ${childId};`);
+      }
+    }
+    return nodeId;
+  }
+  
+  if (Object.keys(ruleMap).length > 0) {
+    expand('S', 0, 3);
+  }
+  
+  lines.push('}');
+  return lines.join('\n');
+}
+
+async function renderCFG(text, rules) {
   const el = $('cfg-text');
   el.innerHTML = colorizeCFG(text);
+  
+  const container = $('cfg-graph');
+  if (container && rules) {
+    container.innerHTML = '<span style="color:#6c7086">Rendering tree…</span>';
+    try {
+      const viz = await getViz();
+      const svg = viz.renderSVGElement(buildCfgDot(rules));
+      applyDarkThemeSVG(svg);
+      container.innerHTML = '';
+      container.appendChild(svg);
+    } catch (e) {
+      container.innerHTML = `<span style="color:#f38ba8">Error rendering tree: ${e.message}</span>`;
+    }
+  }
 }
 
 /**
@@ -246,6 +353,9 @@ function findNode(svgRoot, label) {
   for (const t of titles) {
     if (t.textContent === label) return t.parentNode;
   }
+  // Fallback for custom PDA SVG which uses id attribute
+  const el = svgRoot.querySelector(`g.node[id="${label}"]`);
+  if (el) return el;
   return null;
 }
 
@@ -264,9 +374,20 @@ function highlightStep(panelId, step, prevStep) {
   // Clear previous highlights
   svg.querySelectorAll('.node.active, .edge.active').forEach(n => n.classList.remove('active'));
   if (!step) return;
-  const fromNode = findNode(svg, step.from_state);
-  const toNode = findNode(svg, step.to_state);
-  const edge = findEdge(svg, step.from_state, step.to_state);
+  
+  let fromState = step.from_state;
+  let toState = step.to_state;
+  
+  if (panelId === 'pda-graph') {
+    const isExpr2 = state.current && state.current.name.includes('0,1');
+    const mapping = isExpr2 ? EXPR2_STATE_TO_NODE : EXPR1_STATE_TO_NODE;
+    fromState = mapping[fromState] || fromState;
+    toState = mapping[toState] || toState;
+  }
+  
+  const fromNode = findNode(svg, fromState);
+  const toNode = findNode(svg, toState);
+  const edge = findEdge(svg, fromState, toState);
   if (fromNode) fromNode.classList.add('active');
   if (toNode) toNode.classList.add('active');
   if (edge) edge.classList.add('active');
@@ -308,6 +429,11 @@ function resetRun() {
   renderTrace('view-pda', [], -1);
   renderStack(['Z'], null);
   setResult('', '');
+  
+  const inputEl = $('pda-input-string');
+  if (inputEl) inputEl.textContent = state.lastInput || '';
+  const transEl = $('pda-current-transition');
+  if (transEl) transEl.textContent = 'Waiting to start...';
 }
 
 function stopPlaying() {
@@ -326,6 +452,16 @@ function applyStep(idx) {
                  : step.stack_after.length < step.stack_before.length ? 'popped'
                  : null;
       renderStack(step.stack_after, kind);
+      
+      const inputEl = $('pda-input-string');
+      if (inputEl) {
+        inputEl.innerHTML = `<span style="color: #6c7086;">${state.lastInput.substring(0, step.step_number)}</span><span style="color: #cdd6f4;">${state.lastInput.substring(step.step_number)}</span>`;
+      }
+      
+      const transEl = $('pda-current-transition');
+      if (transEl) {
+        transEl.innerHTML = `Step ${step.step_number}: <b>${step.from_state}</b> &rarr; <b>${step.symbol}</b> &rarr; <b>${step.to_state}</b><br/><span style="color:#89b4fa; font-size: 0.9em;">[${step.pda_action || 'No stack change'}]</span>`;
+      }
     }
     renderTrace('view-pda', state.steps, idx);
   } else {
@@ -380,7 +516,7 @@ async function loadExpression(name) {
   const auto = await fetchAutomaton(name);
   state.automaton = auto;
   await renderDFA(auto.dfa.dot);
-  renderCFG(auto.cfg.text);
+  renderCFG(auto.cfg.text, auto.cfg.rules);
   await renderPDA(auto.pda);
   resetRun();
 }
@@ -400,6 +536,7 @@ async function onTest() {
   const activePanel = document.querySelector('.panel.active').id;
   const mode = activePanel === 'view-pda' ? 'pda' : 'dfa';
   state.mode = mode;
+  state.lastInput = input;
   resetRun();
   const res = await processString(state.current.name, input, mode);
   state.lastResult = res;
@@ -433,12 +570,15 @@ async function init() {
     btn.addEventListener('click', () => switchView(btn.dataset.view));
   });
 
-  $('dfa-play').addEventListener('click', () => { state.mode = 'dfa'; play('view-dfa'); });
-  $('dfa-step').addEventListener('click', () => { state.mode = 'dfa'; stepOnce(); });
-  $('dfa-reset').addEventListener('click', resetRun);
-  $('pda-play').addEventListener('click', () => { state.mode = 'pda'; play('view-pda'); });
-  $('pda-step').addEventListener('click', () => { state.mode = 'pda'; stepOnce(); });
-  $('pda-reset').addEventListener('click', resetRun);
+  const btn = (id, fn) => { const el = $(id); if (el) el.addEventListener('click', fn); };
+  btn('dfa-play', () => { state.mode = 'dfa'; play('view-dfa'); });
+  btn('dfa-stop', stopPlaying);
+  btn('dfa-step', () => { state.mode = 'dfa'; stepOnce(); });
+  btn('dfa-reset', resetRun);
+  btn('pda-play', () => { state.mode = 'pda'; play('view-pda'); });
+  btn('pda-stop', stopPlaying);
+  btn('pda-step', () => { state.mode = 'pda'; stepOnce(); });
+  btn('pda-reset', resetRun);
 
   if (state.expressions.length) await loadExpression(state.expressions[0].name);
 }

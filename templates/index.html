@@ -44,6 +44,7 @@
         <h2>Deterministic Finite Automaton</h2>
         <div class="panel-controls">
           <button id="dfa-play">Play</button>
+          <button id="dfa-stop">Stop</button>
           <button id="dfa-step">Step</button>
           <button id="dfa-reset">Reset</button>
         </div>
@@ -57,6 +58,7 @@
         <h2>Context-Free Grammar</h2>
       </header>
       <pre id="cfg-text" class="cfg-text"></pre>
+      <div id="cfg-graph" class="graph" style="flex: 1; min-height: 300px;"></div>
       <div class="legend">
         <span><b style="color:#89b4fa">S, A, B…</b> Variables</span>
         <span><b style="color:#a6e3a1">a, b, 0, 1</b> Terminals</span>
@@ -71,6 +73,7 @@
         <h2>Pushdown Automaton</h2>
         <div class="panel-controls">
           <button id="pda-play">Play</button>
+          <button id="pda-stop">Stop</button>
           <button id="pda-step">Step</button>
           <button id="pda-reset">Reset</button>
         </div>
@@ -78,8 +81,15 @@
       <div class="pda-layout">
         <div id="pda-graph" class="graph"></div>
         <div class="pda-side">
+          <h3>Input</h3>
+          <div id="pda-input-string" class="trace" style="min-height: 40px; display: flex; align-items: center; padding: 0 1rem; font-size: 1.2rem; margin-bottom: 1rem;"></div>
+          
+          <h3>Current Transition</h3>
+          <div id="pda-current-transition" class="trace" style="min-height: 60px; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 1.1rem; color: #f9e2af; margin-bottom: 1rem;"></div>
+          
           <h3>Stack</h3>
           <div id="pda-stack" class="stack"></div>
+          
           <h3>Trace</h3>
           <div id="pda-trace" class="trace"></div>
         </div>
@@ -87,6 +97,7 @@
     </section>
   </main>
 
+  <script src="/static/js/pda_svg.js"></script>
   <script src="/static/js/app.js"></script>
 </body>
 </html>
