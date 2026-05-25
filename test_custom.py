@@ -24,26 +24,37 @@ def test_expression1():
         "babbabbaba",        # bab + '' + bab + '' + ba + ''
         "abababa",           # aba + '' + bab + '' + a + ''
         "babbabba",          # bab + '' + bab + '' + ba + ''
+        "ababbabbbb",        # aba + bb + bab + bbb
+        "babbaba",           # bab + '' + bab + a
+        "babbababa",         # bab + '' + bab + aba
+        "abaaaababaaa",      # aba + aaa + bab + aaa
+        "ababababa",         # aba + ba + bab + a
     ]
     
     print("Strings that should be ACCEPTED:")
     for s in accept_tests:
         result = engine.process_string_dfa(s)
-        status = '✓ ACCEPTED' if result.accepted else '✗ REJECTED'
+        status = '[PASS] ACCEPTED' if result.accepted else '[FAIL] REJECTED'
         print(f"  '{s}' -> {status}")
     
     # Test strings that should be REJECTED
     reject_tests = [
         "ab",                # Too short
         "aa",                # Doesn't start with aba/bab
-        "ababab",            # Missing proper pattern
+        "ababab",            # Missing proper suffix after bab
         "",                  # Empty string
+        "aba",               # Too short (needs bab and suffix)
+        "bab",               # Too short
+        "ababaa",            # aba + baa (missing bab)
+        "babaaba",           # bab + aaba (missing bab)
+        "babbab",            # bab + bab (missing suffix)
+        "bababab",           # bab + a + bab (missing suffix)
     ]
     
     print("\nStrings that should be REJECTED:")
     for s in reject_tests:
         result = engine.process_string_dfa(s)
-        status = '✗ REJECTED' if not result.accepted else '✓ ACCEPTED'
+        status = '[PASS] REJECTED' if not result.accepted else '[FAIL] ACCEPTED'
         print(f"  '{s}' -> {status}")
 
 def test_expression2():
@@ -78,12 +89,33 @@ def test_expression2():
         "0000",       # 0 + '' + 000 + ''
         "101101",     # 101 + '' + 101 + ''
         "1111111",    # 1 + '1' + 111 + '11'
+        "010101",     # 0 + 101 + 01
+        "0010001",    # 0 + 01 + 000 + 1
+        "1101110",    # 1 + 10 + 111 + 0
     ]
     
-    print("Testing various strings:")
+    print("Strings that should be ACCEPTED:")
     for s in accept_tests:
         result = engine.process_string_dfa(s)
-        status = '✓ ACCEPTED' if result.accepted else '✗ REJECTED'
+        status = '[PASS] ACCEPTED' if result.accepted else '[FAIL] REJECTED'
+        print(f"  '{s}' -> {status}")
+        
+    reject_tests = [
+        "111",        # Too short (min length 4 due to prefix + pattern)
+        "000",        # Too short
+        "101",        # Too short
+        "010",        # Doesn't contain 111, 000, 101
+        "0011",       # Doesn't contain 111, 000, 101
+        "1100",       # Doesn't contain 111, 000, 101
+        "1001",       # Doesn't contain 111, 000, 101
+        "0110",       # Doesn't contain 111, 000, 101
+        "",           # Empty string
+    ]
+    
+    print("\nStrings that should be REJECTED:")
+    for s in reject_tests:
+        result = engine.process_string_dfa(s)
+        status = '[PASS] REJECTED' if not result.accepted else '[FAIL] ACCEPTED'
         print(f"  '{s}' -> {status}")
 
 if __name__ == "__main__":

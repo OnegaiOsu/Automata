@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="en">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -9,15 +10,18 @@
   <!-- Viz.js renders Graphviz DOT in the browser via WASM -->
   <script src="https://cdn.jsdelivr.net/npm/@viz-js/viz@3.7.0/lib/viz-standalone.js"></script>
 </head>
+
 <body>
   <aside class="sidebar">
-    <h1 class="brand">Automata<br/><span>Visualizer</span></h1>
+    <h1 class="brand">Automata<br /><span>Made with Love by:
+        Abel, Acosta, Astrero, Escander, Maglalang
+      </span></h1>
 
     <label class="label" for="expression">Expression</label>
     <select id="expression"></select>
     <div id="regex-display" class="regex-display"></div>
 
-    <hr/>
+    <hr />
 
     <label class="label" for="input">Test String</label>
     <input id="input" type="text" placeholder="Enter string..." autocomplete="off" />
@@ -25,7 +29,7 @@
     <button id="test-btn" class="primary">Test</button>
     <div id="result" class="result"></div>
 
-    <hr/>
+    <hr />
 
     <label class="label">View</label>
     <div class="view-buttons">
@@ -44,6 +48,7 @@
         <h2>Deterministic Finite Automaton</h2>
         <div class="panel-controls">
           <button id="dfa-play">Play</button>
+          <button id="dfa-stop">Stop</button>
           <button id="dfa-step">Step</button>
           <button id="dfa-reset">Reset</button>
         </div>
@@ -55,8 +60,16 @@
     <section id="view-cfg" class="panel">
       <header class="panel-header">
         <h2>Context-Free Grammar</h2>
+        <div class="panel-controls">
+          <button id="cfg-play">Play</button>
+          <button id="cfg-stop">Stop</button>
+          <button id="cfg-step">Step</button>
+          <button id="cfg-reset">Reset</button>
+        </div>
       </header>
       <pre id="cfg-text" class="cfg-text"></pre>
+      <div id="cfg-graph" class="graph" style="flex: 1; min-height: 300px;"></div>
+      <div id="cfg-trace" class="trace"></div>
       <div class="legend">
         <span><b style="color:#89b4fa">S, A, B…</b> Variables</span>
         <span><b style="color:#a6e3a1">a, b, 0, 1</b> Terminals</span>
@@ -71,6 +84,7 @@
         <h2>Pushdown Automaton</h2>
         <div class="panel-controls">
           <button id="pda-play">Play</button>
+          <button id="pda-stop">Stop</button>
           <button id="pda-step">Step</button>
           <button id="pda-reset">Reset</button>
         </div>
@@ -78,8 +92,19 @@
       <div class="pda-layout">
         <div id="pda-graph" class="graph"></div>
         <div class="pda-side">
+          <h3>Input</h3>
+          <div id="pda-input-string" class="trace"
+            style="min-height: 40px; display: flex; align-items: center; padding: 0 1rem; font-size: 1.2rem; margin-bottom: 1rem;">
+          </div>
+
+          <h3>Current Transition</h3>
+          <div id="pda-current-transition" class="trace"
+            style="min-height: 60px; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 1.1rem; color: #f9e2af; margin-bottom: 1rem;">
+          </div>
+
           <h3>Stack</h3>
           <div id="pda-stack" class="stack"></div>
+
           <h3>Trace</h3>
           <div id="pda-trace" class="trace"></div>
         </div>
@@ -87,6 +112,8 @@
     </section>
   </main>
 
+  <script src="/static/js/pda_svg.js"></script>
   <script src="/static/js/app.js"></script>
 </body>
+
 </html>

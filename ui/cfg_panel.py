@@ -8,9 +8,9 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextEdit,
     QLabel, QGroupBox, QScrollArea, QFrame,
     QSizePolicy, QSplitter, QGraphicsView, QGraphicsScene,
-    QGraphicsTextItem, QGraphicsEllipseItem
+    QGraphicsTextItem, QGraphicsEllipseItem, QToolBar, QPushButton
 )
-from PyQt6.QtCore import Qt, QPointF, QRectF
+from PyQt6.QtCore import Qt, QPointF, QRectF, QTimer, pyqtSignal
 from PyQt6.QtGui import (
     QFont, QColor, QTextCharFormat, QSyntaxHighlighter,
     QTextDocument, QPen, QBrush, QPainter, QPainterPath
@@ -102,9 +102,14 @@ class CFGHighlighter(QSyntaxHighlighter):
 class CFGPanel(QWidget):
     """Panel for displaying Context-Free Grammar production rules with derivation tree."""
     
+    animation_finished = pyqtSignal(bool)
+    
     def __init__(self, engine: AutomataEngine, parent=None):
         super().__init__(parent)
         self.engine = engine
+        self.steps = []
+        self.current_idx = -1
+        self.last_result = None
         self._setup_ui()
     
     def _setup_ui(self):
@@ -120,9 +125,32 @@ class CFGPanel(QWidget):
         title.setObjectName("title")
         title.setStyleSheet("font-size: 20px; color: #89b4fa;")
         header_layout.addWidget(title)
+        
+        # Add Toolbar
+        toolbar = QToolBar()
+        toolbar.setIconSize(toolbar.iconSize())
+        toolbar.setStyleSheet("background: transparent; border: none;")
+        
+        self.btn_play = QPushButton("Play")
+        self.btn_play.clicked.connect(self.play_simulation)
+        self.btn_stop = QPushButton("Stop")
+        self.btn_stop.clicked.connect(self.stop_simulation)
+        self.btn_step = QPushButton("Step")
+        self.btn_step.clicked.connect(self.step_simulation)
+        self.btn_reset = QPushButton("Reset")
+        self.btn_reset.clicked.connect(self.reset_simulation)
+        
+        for btn in [self.btn_play, self.btn_stop, self.btn_step, self.btn_reset]:
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            toolbar.addWidget(btn)
+            
         header_layout.addStretch()
+        header_layout.addWidget(toolbar)
         
         layout.addLayout(header_layout)
+        
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._timer_tick)
         
         # Main content: derivation tree (top) + rules (bottom)
         splitter = QSplitter(Qt.Orientation.Vertical)
@@ -146,20 +174,35 @@ class CFGPanel(QWidget):
         tree_layout.addWidget(self.tree_view)
         splitter.addWidget(tree_group)
         
-        # ===== BOTTOM: Production rules text =====
+        # ===== BOTTOM: Production rules text and Trace =====
+        bottom_splitter = QSplitter(Qt.Orientation.Horizontal)
+        
         rules_group = QGroupBox("Production Rules")
         rules_layout = QVBoxLayout(rules_group)
         
         self.rules_text = QTextEdit()
         self.rules_text.setReadOnly(True)
-        self.rules_text.setFont(QFont("Cascadia Code", 13))
+        self.rules_text.setFont(QFont("Cascadia Code", 16))
+        self.rules_text.setStyleSheet("line-height: 200%;")
         self.rules_text.setMinimumHeight(120)
         
-        # Apply syntax highlighter
         self.highlighter = CFGHighlighter(self.rules_text.document())
-        
         rules_layout.addWidget(self.rules_text)
-        splitter.addWidget(rules_group)
+        
+        trace_group = QGroupBox("Derivation Trace")
+        trace_layout = QVBoxLayout(trace_group)
+        
+        self.trace_text = QTextEdit()
+        self.trace_text.setReadOnly(True)
+        self.trace_text.setFont(QFont("Cascadia Code", 12))
+        self.trace_text.setMinimumHeight(120)
+        trace_layout.addWidget(self.trace_text)
+        
+        bottom_splitter.addWidget(rules_group)
+        bottom_splitter.addWidget(trace_group)
+        bottom_splitter.setSizes([300, 300])
+        
+        splitter.addWidget(bottom_splitter)
         
         splitter.setSizes([450, 250])
         layout.addWidget(splitter, 1)
@@ -206,7 +249,23 @@ class CFGPanel(QWidget):
     def update_grammar(self):
         """Update the displayed grammar and derivation tree from the engine."""
         cfg_text = self.engine.get_cfg_text()
-        self.rules_text.setPlainText(cfg_text)
+        
+        # Remove the metadata headers if any to match reference exactly
+        lines = cfg_text.split('\n')
+        clean_lines = []
+        for line in lines:
+            if line.startswith('=') or line.startswith('Context') or line.startswith('Start') or line.startswith('Terminal'):
+                continue
+            
+            # Format arrows to be like reference (space around arrow)
+            if '→' in line:
+                line = line.replace('→', '->')
+            
+            if line.strip():
+                clean_lines.append(line)
+        
+        formatted_text = "\n\n".join(clean_lines)
+        self.rules_text.setPlainText(formatted_text)
         self._build_derivation_tree()
     
     def _build_derivation_tree(self):
@@ -416,3 +475,122 @@ class CFGPanel(QWidget):
         self.rules_text.clear()
         self.rules_text.setPlainText("No grammar loaded. Select an expression above.")
         self.tree_scene.clear()
+        self.trace_text.clear()
+
+    # --- Animation & Simulation ---
+    
+    def process_string(self, input_string: str):
+        """Start simulating the string."""
+        self.last_result = self.engine.process_string_cfg(input_string)
+        self.steps = self.last_result.steps if self.last_result else []
+        self.current_idx = -1
+        self.reset_simulation()
+        self.play_simulation()
+        
+    def play_simulation(self):
+        if not self.steps: return
+        self.stop_simulation()
+        self.current_idx = max(0, self.current_idx)
+        self._apply_step(self.current_idx)
+        self.timer.start(700)
+        
+    def stop_simulation(self):
+        self.timer.stop()
+        
+    def step_simulation(self):
+        if not self.steps: return
+        self.stop_simulation()
+        if self.current_idx >= len(self.steps) - 1:
+            self._announce_result()
+            return
+        self.current_idx += 1
+        self._apply_step(self.current_idx)
+        if self.current_idx >= len(self.steps) - 1:
+            self._announce_result()
+            
+    def reset_simulation(self):
+        self.stop_simulation()
+        self.current_idx = -1
+        self.trace_text.clear()
+        # Reset to static tree
+        self._build_derivation_tree()
+        
+    def _timer_tick(self):
+        self.current_idx += 1
+        if self.current_idx >= len(self.steps):
+            self.stop_simulation()
+            self._announce_result()
+            return
+        self._apply_step(self.current_idx)
+        
+    def _apply_step(self, idx: int):
+        # Update derivation trace
+        self.trace_text.clear()
+        for i in range(idx + 1):
+            step = self.steps[i]
+            prefix = "→ " if i == idx else "  "
+            if step.rule_left:
+                line = f"{prefix}{i+1}. {step.rule_left} -> {step.rule_right}  (Current: {step.current_string})"
+            else:
+                line = f"{prefix}{i+1}. Matched!  (Current: {step.current_string})"
+            self.trace_text.append(line)
+        
+        # We can dynamically build the exact derivation tree!
+        # Because we're using QGraphicsScene, we can just rebuild the tree from scratch with the steps
+        self.tree_scene.clear()
+        rules = self.engine.get_cfg_rules()
+        if not rules: return
+        
+        rule_map = {}
+        for rule in rules: rule_map[rule.left] = rule.right
+        
+        tree = self._build_tree_from_steps(rule_map, idx)
+        self._render_tree(tree)
+        
+    def _build_tree_from_steps(self, rule_map, max_idx):
+        # Tree node format: (label, is_terminal, children)
+        root = ['S', False, []]
+        
+        def get_leftmost_nt(node):
+            if not node[1] and not node[2] and node[0] != 'ε':
+                return node
+            for child in node[2]:
+                found = get_leftmost_nt(child)
+                if found: return found
+            return None
+            
+        for i in range(max_idx + 1):
+            step = self.steps[i]
+            if not step.rule_left: continue
+            
+            target = get_leftmost_nt(root)
+            if not target: break
+            
+            right = step.rule_right
+            idx = 0
+            while idx < len(right):
+                char = right[idx]
+                if char == 'ε':
+                    target[2].append(['ε', True, []])
+                    idx += 1
+                elif char.isupper():
+                    var = char
+                    j = idx + 1
+                    while j < len(right) and right[j].isdigit():
+                        var += right[j]
+                        j += 1
+                    target[2].append([var, False, []])
+                    idx = j
+                else:
+                    target[2].append([char, True, []])
+                    idx += 1
+                    
+        # Recursively freeze into tuples for the renderer
+        def freeze(node):
+            return (node[0], node[1], [freeze(c) for c in node[2]])
+            
+        return freeze(root)
+
+    def _announce_result(self):
+        if self.last_result:
+            self.animation_finished.emit(self.last_result.accepted)

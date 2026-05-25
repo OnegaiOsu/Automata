@@ -46,6 +46,8 @@ class EllipseNode(FlowchartNode):
     
     def __init__(self, x: float, y: float, text: str, node_type: str):
         super().__init__(x, y, text, node_type)
+        self._default_pen = None
+        self._default_brush = None
     
     def create_item(self, scene: QGraphicsScene):
         # Choose color based on node type
@@ -62,11 +64,14 @@ class EllipseNode(FlowchartNode):
             pen_color = "#89b4fa"
             fill_color = "#313244"
         
+        self._default_pen = QPen(QColor(pen_color), 2)
+        self._default_brush = QBrush(QColor(fill_color))
+
         self.item = scene.addEllipse(
             self.x - self.WIDTH/2, self.y - self.HEIGHT/2,
             self.WIDTH, self.HEIGHT,
-            QPen(QColor(pen_color), 2),
-            QBrush(QColor(fill_color))
+            self._default_pen,
+            self._default_brush
         )
         
         # Add text label
@@ -78,6 +83,18 @@ class EllipseNode(FlowchartNode):
         
         return self.item
 
+    def highlight(self):
+        """Highlight this node as the active state."""
+        if self.item is not None:
+            self.item.setPen(QPen(QColor("#f9e2af"), 4))
+            self.item.setBrush(QBrush(QColor("#45475a")))
+
+    def reset_appearance(self):
+        """Restore default colors."""
+        if self.item is not None and self._default_pen is not None:
+            self.item.setPen(self._default_pen)
+            self.item.setBrush(self._default_brush)
+
 
 class DiamondNode(FlowchartNode):
     """Diamond node for decision/Read states."""
@@ -86,6 +103,8 @@ class DiamondNode(FlowchartNode):
     
     def __init__(self, x: float, y: float, text: str, node_type: str = 'decision'):
         super().__init__(x, y, text, node_type)
+        self._default_pen = QPen(QColor("#89b4fa"), 2)
+        self._default_brush = QBrush(QColor("#313244"))
     
     def create_item(self, scene: QGraphicsScene):
         # Create diamond shape
@@ -99,8 +118,8 @@ class DiamondNode(FlowchartNode):
         
         self.item = scene.addPolygon(
             polygon,
-            QPen(QColor("#89b4fa"), 2),
-            QBrush(QColor("#313244"))
+            self._default_pen,
+            self._default_brush
         )
         
         # Add text label
@@ -111,6 +130,18 @@ class DiamondNode(FlowchartNode):
         self.label.setPos(self.x - rect.width()/2, self.y - rect.height()/2)
         
         return self.item
+
+    def highlight(self):
+        """Highlight this node as the active state."""
+        if self.item is not None:
+            self.item.setPen(QPen(QColor("#f9e2af"), 4))
+            self.item.setBrush(QBrush(QColor("#45475a")))
+
+    def reset_appearance(self):
+        """Restore default colors."""
+        if self.item is not None:
+            self.item.setPen(self._default_pen)
+            self.item.setBrush(self._default_brush)
 
 
 class StackSymbol(QGraphicsRectItem):
@@ -212,11 +243,9 @@ class StackView(QGraphicsView):
         
         if animate:
             sym_item.highlight_push()
-            # Start above and animate down
-            sym_item.setPos(20, y - 50)
-            sym_item.setOpacity(0)
-            
-            # Animation would be done via QTimer for smooth 120fps
+            sym_item.highlight_push()
+            # Simple jump (snap) instead of smooth interpolation
+            sym_item.setPos(20, y)
         
         self._symbols.append(sym_item)
         self.scene.addItem(sym_item)
@@ -278,6 +307,7 @@ class PDAPanel(QWidget):
         self._animation_timer.timeout.connect(self._animation_tick)
         self._animation_frame = 0
         self._is_animating = False
+        self._diagram_nodes: dict[str, FlowchartNode] = {}
         
         self._setup_ui()
     
@@ -345,11 +375,6 @@ class PDAPanel(QWidget):
         )
         stack_layout.addWidget(self.stack_info)
         
-        splitter.addWidget(stack_group)
-        splitter.setSizes([500, 200])
-        
-        layout.addWidget(splitter, 1)
-        
         # ===== Input String Tracker =====
         input_group = QGroupBox("Input String")
         input_layout = QVBoxLayout(input_group)
@@ -362,8 +387,23 @@ class PDAPanel(QWidget):
         self.input_display.setAlignment(Qt.AlignmentFlag.AlignCenter)
         input_layout.addWidget(self.input_display)
         
-        layout.addWidget(input_group)
+        stack_layout.addWidget(input_group)
         
+        splitter.addWidget(stack_group)
+        splitter.setSizes([500, 200])
+        
+        main_splitter = QSplitter(Qt.Orientation.Vertical)
+        main_splitter.addWidget(splitter)
+        
+        bottom_panel = QWidget()
+        bottom_layout = QVBoxLayout(bottom_panel)
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_layout.setSpacing(10)
+        
+        # ===== Logs & Transition Layout =====
+        logs_layout = QHBoxLayout()
+        logs_layout.setSpacing(10)
+
         # ===== Step Log =====
         step_log_group = QGroupBox("Step Trace")
         step_log_layout = QVBoxLayout(step_log_group)
@@ -377,7 +417,7 @@ class PDAPanel(QWidget):
         )
         step_log_layout.addWidget(self.step_log)
         
-        layout.addWidget(step_log_group)
+        logs_layout.addWidget(step_log_group, stretch=2)
         
         # Transition display
         trans_group = QGroupBox("Current Transition")
@@ -387,9 +427,13 @@ class PDAPanel(QWidget):
         self.transition_label.setStyleSheet(
             "font-family: 'Cascadia Code'; font-size: 13px; padding: 10px;"
         )
+        self.transition_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.transition_label.setWordWrap(True)
         trans_layout.addWidget(self.transition_label)
         
-        layout.addWidget(trans_group)
+        logs_layout.addWidget(trans_group, stretch=1)
+        
+        bottom_layout.addLayout(logs_layout)
         
         # Controls
         controls_layout = QHBoxLayout()
@@ -423,13 +467,17 @@ class PDAPanel(QWidget):
         self.step_label.setObjectName("status")
         controls_layout.addWidget(self.step_label)
         
-        layout.addLayout(controls_layout)
+        bottom_layout.addLayout(controls_layout)
+        
+        main_splitter.addWidget(bottom_panel)
+        main_splitter.setSizes([500, 200])
+        layout.addWidget(main_splitter, 1)
     
     def build_diagram(self):
         """Build flowchart-style PDA diagram matching the user's design."""
         self.state_scene.clear()
         self._flowchart_nodes = {}
-        
+        self._diagram_nodes: dict[str, FlowchartNode] = {}
         data = self.engine.get_dfa_graph_data()
         if not data:
             text = self.state_scene.addText("No PDA loaded. Select an expression above.")
@@ -454,210 +502,442 @@ class PDAPanel(QWidget):
             self.state_scene.sceneRect().adjusted(-30, -30, 30, 30),
             Qt.AspectRatioMode.KeepAspectRatio
         )
-    
+
+    # DFA state -> flowchart node key, used to drive highlighting on
+    # the PDA diagram during step-by-step processing.
+    _EXPR1_STATE_TO_NODE = {
+        '-':  'Read1',
+        'q1': 'ReadA1',
+        'q2': 'ReadB1',
+        'q3': 'ReadA2',
+        'q4': 'ReadB2',
+        'T':  'Reject',
+        'q5': 'ReadLoop',
+        'q6': 'ReadBab1',
+        'q7': 'ReadBab2',
+        'q8': 'ReadBab3',
+        '+':  'Accept',
+    }
+
+    _EXPR2_STATE_TO_NODE = {
+        '-': 'D_Top',
+        'q1': 'D_L1',
+        'q3': 'D_R1',
+        'q2': 'D_L2',
+        'q8': 'D_R2',
+        'q10': 'D_R2',
+        'q5': 'D_M_Right',
+        'q6': 'D_M_Left',
+        'q4': ['D_L3', 'D_BR'],
+        'q7': 'D_q7',
+        'q9': 'D_R3',
+        '+': 'Accept',
+        'T': 'Reject'
+    }
+
+    def _state_to_node_key(self, state: str) -> Optional[str]:
+        """Map a DFA state name to the flowchart node key for the active expression."""
+        current_expr = getattr(self.engine, '_current_expression_key', '') or ''
+        mapping = (self._EXPR2_STATE_TO_NODE if '0,1' in current_expr
+                   else self._EXPR1_STATE_TO_NODE)
+        return mapping.get(str(state))
+
+    def _highlight_state(self, state: str, *, accept_final: bool = False):
+        """Reset all flowchart nodes and highlight the one for `state`."""
+        for node in self._diagram_nodes.values():
+            node.reset_appearance()
+        key = self._state_to_node_key(state)
+        if key:
+            keys = key if isinstance(key, list) else [key]
+            for k in keys:
+                if k in self._diagram_nodes:
+                    self._diagram_nodes[k].highlight()
+        if accept_final and 'Accept' in self._diagram_nodes:
+            self._diagram_nodes['Accept'].highlight()
+
+    def _reset_diagram_highlights(self):
+        """Clear all flowchart highlights."""
+        for node in self._diagram_nodes.values():
+            node.reset_appearance()
     def _build_expression1_flowchart(self):
-        """Build flowchart for Expression 1 (a,b)."""
-        # Center X position
-        cx = 200
-        y_spacing = 70
+        """Build flowchart for Expression 1 exactly matching the user's reference image."""
+        self.state_scene.clear()
         
-        # Create the flowchart nodes based on the PDA structure
-        y = 30
-        
-        # Start node (ellipse)
-        start_node = EllipseNode(cx, y, "Start", "start")
-        start_node.create_item(self.state_scene)
-        self._flowchart_nodes['Start'] = (cx, y)
-        y += y_spacing
-        
-        # First decision: Read input for (aba+bab)
-        read1 = DiamondNode(cx, y, "Read", "decision")
-        read1.create_item(self.state_scene)
-        self._flowchart_nodes['Read1'] = (cx, y)
-        self._draw_arrow(cx, y - y_spacing + 20, cx, y - 25, "")
-        
-        # Branch labels
-        self._draw_text(cx - 50, y - 10, "b")
-        self._draw_text(cx + 40, y - 10, "a")
-        
-        y += y_spacing
-        
-        # Two read branches for aba/bab paths
-        left_x = cx - 80
-        right_x = cx + 80
-        
-        # Left branch (b path - bab)
-        read_b1 = DiamondNode(left_x, y, "Read", "decision")
-        read_b1.create_item(self.state_scene)
-        self._draw_arrow(cx - 25, y - y_spacing, left_x, y - 25, "")
-        
-        # Right branch (a path - aba)  
-        read_a1 = DiamondNode(right_x, y, "Read", "decision")
-        read_a1.create_item(self.state_scene)
-        self._draw_arrow(cx + 25, y - y_spacing, right_x, y - 25, "")
-        
-        y += y_spacing
-        
-        # Reject state in middle
-        reject = EllipseNode(cx, y, "Reject", "reject")
-        reject.create_item(self.state_scene)
-        self._draw_arrow(left_x + 20, y - y_spacing + 20, cx - 30, y - 15, "b")
-        self._draw_arrow(right_x - 20, y - y_spacing + 20, cx + 30, y - 15, "a")
-        
-        # Continue paths
-        read_b2 = DiamondNode(left_x, y, "Read", "decision")
-        read_a2 = DiamondNode(right_x, y, "Read", "decision")
-        
-        y += y_spacing
-        
-        # Paths converge for (a+b)*
-        read_loop = DiamondNode(cx, y, "Read", "decision")
-        read_loop.create_item(self.state_scene)
-        self._draw_arrow(left_x, y - y_spacing + 25, cx - 20, y - 25, "a")
-        self._draw_arrow(right_x, y - y_spacing + 25, cx + 20, y - 25, "b")
-        
-        # Self-loop indicator
-        self._draw_loop(cx, y, "a,b")
-        
-        y += y_spacing
-        
-        # Looking for bab pattern
-        read_bab1 = DiamondNode(cx, y, "Read", "decision")
-        read_bab1.create_item(self.state_scene)
-        self._draw_arrow(cx, y - y_spacing + 25, cx, y - 25, "b")
-        
-        y += y_spacing
-        read_bab2 = DiamondNode(cx, y, "Read", "decision")
-        read_bab2.create_item(self.state_scene)
-        self._draw_arrow(cx, y - y_spacing + 25, cx, y - 25, "a")
-        
-        y += y_spacing
-        read_bab3 = DiamondNode(cx, y, "Read", "decision")
-        read_bab3.create_item(self.state_scene)
-        self._draw_arrow(cx, y - y_spacing + 25, cx, y - 25, "b")
-        
-        # Another (a+b)* loop
-        self._draw_loop(cx, y, "a,b")
-        
-        y += y_spacing
-        
-        # Final read for (a+b+ab+ba)
-        read_final = DiamondNode(cx, y, "Read", "decision")
-        read_final.create_item(self.state_scene)
-        self._draw_arrow(cx, y - y_spacing + 25, cx, y - 25, "a,b")
-        
-        # Self-loop for (a+b+aa)*
-        self._draw_loop(cx, y, "a,b")
-        
-        y += y_spacing
-        
-        # Accept node
-        accept = EllipseNode(cx, y, "Accept", "accept")
-        accept.create_item(self.state_scene)
-        self._draw_arrow(cx, y - y_spacing + 25, cx, y - 20, "")
-    
-    def _build_expression2_flowchart(self):
-        """
-        Build flowchart for Expression 2 (0,1).
-        Expression: ((101+111+101)+(1+0+11))(1+0+01)*(111+000+101)(1+0)*
-        """
-        cx = 200
-        y_spacing = 70
+        cx = 250
+        y_spacing = 80
         y = 30
         
         # Start node
         start_node = EllipseNode(cx, y, "Start", "start")
         start_node.create_item(self.state_scene)
         self._flowchart_nodes['Start'] = (cx, y)
+        self._diagram_nodes['Start'] = start_node
+        
         y += y_spacing
         
-        # First Read - branch on 0 or 1
+        # First decision
         read1 = DiamondNode(cx, y, "Read", "decision")
         read1.create_item(self.state_scene)
-        self._draw_arrow(cx, y - y_spacing + 20, cx, y - 25, "")
-        self._draw_text(cx - 50, y - 10, "0")
-        self._draw_text(cx + 40, y - 10, "1")
+        self._flowchart_nodes['Read1'] = (cx, y)
+        self._diagram_nodes['Read1'] = read1
         
-        y += y_spacing
-        left_x = cx - 80
-        right_x = cx + 80
+        self._draw_ortho_arrow(cx, y - y_spacing + 20, cx, y - 25, "", bend="v")
         
-        # Left branch (0 path)
-        read_l1 = DiamondNode(left_x, y, "Read", "decision")
-        read_l1.create_item(self.state_scene)
-        self._draw_arrow(cx - 25, y - y_spacing, left_x, y - 25, "")
+        # Arrow from Read1 straight down to Reject
+        y_branch_top = y + 120
+        y_reject = y + 220
+        y_branch_bottom = y + 320
         
-        # Right branch (1 path)
-        read_r1 = DiamondNode(right_x, y, "Read", "decision")
-        read_r1.create_item(self.state_scene)
-        self._draw_arrow(cx + 25, y - y_spacing, right_x, y - 25, "")
-        
-        # 0 path self-loop
-        self._draw_loop_left(left_x, y, "0")
-        
-        y += y_spacing
-        
-        # Reject state in middle
-        reject = EllipseNode(cx, y, "Reject", "reject")
+        reject = EllipseNode(cx, y_reject, "Reject", "reject")
         reject.create_item(self.state_scene)
-        self._draw_arrow(left_x + 20, y - y_spacing + 20, cx - 30, y - 15, "ε")
+        self._diagram_nodes['Reject'] = reject
         
-        # Right continues to Read2
-        read_r2 = DiamondNode(right_x, y, "Read", "decision")
-        read_r2.create_item(self.state_scene)
-        self._draw_arrow(right_x, y - y_spacing + 25, right_x, y - 25, "1")
+        self._draw_ortho_arrow(cx, y + 25, cx, y_reject - 35, "null", bend="v")
         
-        y += y_spacing
+        left_x = cx - 140
+        right_x = cx + 140
         
-        # Middle section - loop state
+        # Left Branch top (ReadB1)
+        read_b1 = DiamondNode(left_x, y_branch_top, "Read", "decision")
+        read_b1.create_item(self.state_scene)
+        self._diagram_nodes['ReadB1'] = read_b1
+        
+        self._draw_ortho_arrow(cx - 25, y, left_x, y_branch_top - 25, "b", bend="hv")
+        
+        # Right Branch top (ReadA1)
+        read_a1 = DiamondNode(right_x, y_branch_top, "Read", "decision")
+        read_a1.create_item(self.state_scene)
+        self._diagram_nodes['ReadA1'] = read_a1
+        
+        self._draw_ortho_arrow(cx + 25, y, right_x, y_branch_top - 25, "a", bend="hv")
+        
+        # Arrow ReadB1 -> Reject
+        self._draw_ortho_arrow(left_x + 15, y_branch_top + 15, cx - 20, y_reject - 20, "b", bend="v", bend_pos=y_branch_top + 45)
+        # Arrow ReadA1 -> Reject
+        self._draw_ortho_arrow(right_x - 15, y_branch_top + 15, cx + 20, y_reject - 20, "a", bend="v", bend_pos=y_branch_top + 45)
+        
+        # Left Branch bottom (ReadB2)
+        read_b2 = DiamondNode(left_x, y_branch_bottom, "Read", "decision")
+        read_b2.create_item(self.state_scene)
+        self._diagram_nodes['ReadB2'] = read_b2
+        
+        self._draw_ortho_arrow(left_x, y_branch_top + 25, left_x, y_branch_bottom - 25, "a", bend="v")
+        
+        # Right Branch bottom (ReadA2)
+        read_a2 = DiamondNode(right_x, y_branch_bottom, "Read", "decision")
+        read_a2.create_item(self.state_scene)
+        self._diagram_nodes['ReadA2'] = read_a2
+        
+        self._draw_ortho_arrow(right_x, y_branch_top + 25, right_x, y_branch_bottom - 25, "b", bend="v")
+        
+        # Arrow ReadB2 -> Reject
+        self._draw_ortho_arrow(left_x + 25, y_branch_bottom, cx - 25, y_reject + 15, "a", bend="h", bend_pos=left_x + 60)
+        # Arrow ReadA2 -> Reject
+        self._draw_ortho_arrow(right_x - 25, y_branch_bottom, cx + 25, y_reject + 15, "b", bend="h", bend_pos=right_x - 60)
+        
+        # Converge to the vertical line
+        y = y_branch_bottom + y_spacing
+        
+        # ReadLoop (q5)
         read_loop = DiamondNode(cx, y, "Read", "decision")
         read_loop.create_item(self.state_scene)
-        self._draw_arrow(left_x, y - y_spacing - 70 + 25, cx - 20, y - 25, "1")
-        self._draw_arrow(right_x, y - y_spacing + 25, cx + 20, y - 25, "1")
+        self._diagram_nodes['ReadLoop'] = read_loop
         
-        # (1+0+01)* loop
-        self._draw_loop(cx, y, "0,1")
+        self._draw_ortho_arrow(left_x + 15, y_branch_bottom + 15, cx - 15, y - 15, "b", bend="v", bend_pos=y_branch_bottom + 40)
+        self._draw_ortho_arrow(right_x - 15, y_branch_bottom + 15, cx + 15, y - 15, "a", bend="v", bend_pos=y_branch_bottom + 40)
+        self._draw_loop(cx, y, "a")
         
+        # ReadBab1 (q6)
         y += y_spacing
+        read_bab1 = DiamondNode(cx, y, "Read", "decision")
+        read_bab1.create_item(self.state_scene)
+        self._diagram_nodes['ReadBab1'] = read_bab1
         
-        # Pattern detection section (111+000+101)
-        read_p1 = DiamondNode(cx, y, "Read", "decision")
-        read_p1.create_item(self.state_scene)
-        self._draw_arrow(cx, y - y_spacing + 25, cx, y - 25, "0,1")
+        self._draw_ortho_arrow(cx, y - y_spacing + 25, cx, y - 25, "b", bend="v")
+        self._draw_ortho_arrow(cx + 25, y, cx + 15, y - y_spacing + 15, "b", bend="h", bend_pos=cx + 60)
         
+        # ReadBab2 (q7)
         y += y_spacing
-        read_p2 = DiamondNode(cx, y, "Read", "decision")
-        read_p2.create_item(self.state_scene)
-        self._draw_arrow(cx, y - y_spacing + 25, cx, y - 25, "0,1")
+        read_bab2 = DiamondNode(cx, y, "Read", "decision")
+        read_bab2.create_item(self.state_scene)
+        self._diagram_nodes['ReadBab2'] = read_bab2
         
+        self._draw_ortho_arrow(cx, y - y_spacing + 25, cx, y - 25, "a", bend="v")
+        self._draw_ortho_arrow(cx + 25, y, cx + 20, y - y_spacing*2 + 15, "a", bend="h", bend_pos=cx + 100)
+        
+        # ReadBab3 (q8)
         y += y_spacing
-        read_p3 = DiamondNode(cx, y, "Read", "decision")
-        read_p3.create_item(self.state_scene)
-        self._draw_arrow(cx, y - y_spacing + 25, cx, y - 25, "0,1")
+        read_bab3 = DiamondNode(cx, y, "Read", "decision")
+        read_bab3.create_item(self.state_scene)
+        self._diagram_nodes['ReadBab3'] = read_bab3
         
-        # (1+0)* loop
-        self._draw_loop(cx, y, "0,1")
-        
-        y += y_spacing
+        self._draw_ortho_arrow(cx, y - y_spacing + 25, cx, y - 25, "b", bend="v")
+        self._draw_loop(cx, y, "a,b")
         
         # Accept node
+        y += y_spacing
         accept = EllipseNode(cx, y, "Accept", "accept")
         accept.create_item(self.state_scene)
-        self._draw_arrow(cx, y - y_spacing + 25, cx, y - 20, "")
+        self._diagram_nodes['Accept'] = accept
+        self._draw_ortho_arrow(cx, y - y_spacing + 25, cx, y - 20, "null", bend="v")
+        
+    def _build_expression2_flowchart(self):
+        """
+        Build flowchart for Expression 2 (0,1).
+        Expression: ((101+111+101)+(1+0+11))(1+0+01)*(111+000+101)(1+0)*
+        """
+        cx = 250
+        y_top = 120
+        y_reject = 200
+        y_row1 = 240
+        y_row2 = 340
+        y_row3 = 400
+        y_row4 = 600
+        y_row5 = 700
+        y_accept = 800
+        
+        col_L2 = cx - 200
+        col_L1 = cx - 100
+        col_C = cx
+        col_R1 = cx + 100
+        col_R2 = cx + 200
+        
+        # Nodes
+        start = EllipseNode(col_C, 30, "Start", "start")
+        start.create_item(self.state_scene)
+        self._diagram_nodes['Start'] = start
+        
+        d_top = DiamondNode(col_C, y_top, "Read", "decision")
+        d_top.create_item(self.state_scene)
+        self._diagram_nodes['D_Top'] = d_top
+        
+        reject = EllipseNode(col_C, y_reject, "Reject", "reject")
+        reject.create_item(self.state_scene)
+        self._diagram_nodes['Reject'] = reject
+        
+        d_l1 = DiamondNode(col_L2, y_row1, "Read", "decision")
+        d_l1.create_item(self.state_scene)
+        self._diagram_nodes['D_L1'] = d_l1
+        
+        d_r1 = DiamondNode(col_R2, y_row1, "Read", "decision")
+        d_r1.create_item(self.state_scene)
+        self._diagram_nodes['D_R1'] = d_r1
+        
+        d_l2 = DiamondNode(col_L2, y_row2, "Read", "decision")
+        d_l2.create_item(self.state_scene)
+        self._diagram_nodes['D_L2'] = d_l2
+        
+        d_m_right = DiamondNode(col_R1, y_row2, "Read", "decision")
+        d_m_right.create_item(self.state_scene)
+        self._diagram_nodes['D_M_Right'] = d_m_right
+        
+        d_r2 = DiamondNode(col_R2, y_row2, "Read", "decision")
+        d_r2.create_item(self.state_scene)
+        self._diagram_nodes['D_R2'] = d_r2
+        
+        d_m_left = DiamondNode(col_L1, y_row3, "Read", "decision")
+        d_m_left.create_item(self.state_scene)
+        self._diagram_nodes['D_M_Left'] = d_m_left
+        
+        d_l3 = DiamondNode(col_L2, y_row4, "Read", "decision")
+        d_l3.create_item(self.state_scene)
+        self._diagram_nodes['D_L3'] = d_l3
+        
+        d_q7 = DiamondNode(col_C, y_row4, "Read", "decision")
+        d_q7.create_item(self.state_scene)
+        self._diagram_nodes['D_q7'] = d_q7
+        
+        d_r3 = DiamondNode(col_R2, y_row4, "Read", "decision")
+        d_r3.create_item(self.state_scene)
+        self._diagram_nodes['D_R3'] = d_r3
+        
+        d_br = DiamondNode(col_R1, y_row5, "Read", "decision")
+        d_br.create_item(self.state_scene)
+        self._diagram_nodes['D_BR'] = d_br
+        
+        accept = EllipseNode(col_C, y_accept, "Accept", "accept")
+        accept.create_item(self.state_scene)
+        self._diagram_nodes['Accept'] = accept
+        
+        # Top arrows
+        self._draw_ortho_arrow(col_C, 30 + 25, col_C, y_top - 25, "", bend="v")
+        self._draw_ortho_arrow(col_C, y_top + 25, col_C, y_reject - 25, "null", bend="v") # triangle label equivalent
+        
+        self._draw_ortho_arrow(col_C - 25, y_top, col_L2, y_row1 - 25, "1", bend="hv")
+        self._draw_ortho_arrow(col_C + 25, y_top, col_R2, y_row1 - 25, "0", bend="hv")
+        
+        # Row 1 -> Row 2
+        self._draw_ortho_arrow(col_L2, y_row1 + 25, col_L2, y_row2 - 25, "1", bend="v")
+        self._draw_ortho_arrow(col_L2 + 15, y_row1 + 15, col_R2 - 10, y_row2 - 20, "0", bend="v", bend_pos=y_row1 + 45) # L1 to R2
+        
+        self._draw_ortho_arrow(col_R2, y_row1 + 25, col_R2, y_row2 - 25, "0", bend="v")
+        self._draw_ortho_arrow(col_R2 - 15, y_row1 + 15, col_R1, y_row2 - 25, "1", bend="v", bend_pos=y_row1 + 60)
+        
+        # Row 2 -> Row 3/4
+        self._draw_ortho_arrow(col_L2, y_row2 + 25, col_L2, y_row4 - 25, "1", bend="v") # L2 to L3
+        self._draw_ortho_arrow(col_L2 + 15, y_row2 + 15, col_L1, y_row3 - 25, "0", bend="v", bend_pos=y_row3 - 40) # L2 to M_Left
+        
+        self._draw_ortho_arrow(col_R1, y_row2 + 25, col_R1, y_row5 - 25, "1", bend="v") # M_Right to BR
+        self._draw_ortho_arrow(col_R1 - 15, y_row2 + 15, col_L1 + 10, y_row3 - 20, "0", bend="v", bend_pos=y_row3 - 40) # M_Right to M_Left
+        
+        self._draw_ortho_arrow(col_R2, y_row2 + 25, col_R2, y_row4 - 25, "1", bend="v") # R2 to R3
+        self._draw_ortho_arrow(col_R2 - 15, y_row2 + 15, col_C + 15, y_row4 - 15, "0", bend="v", bend_pos=500) # R2 to q7
+        
+        # Row 3 (M_Left) -> Row 4 / Accept
+        self._draw_ortho_arrow(col_L1 + 15, y_row3 + 15, col_C - 15, y_row4 - 15, "0", bend="v", bend_pos=y_row3 + 45) # M_Left to q7
+        self._draw_ortho_arrow(col_L1, y_row3 + 25, col_C - 20, y_accept - 25, "1", bend="v", bend_pos=750) # M_Left to Accept avoids q7
+        
+        # Row 4 -> Accept / Backwards
+        # L3
+        self._draw_ortho_arrow(col_L2, y_row4 + 25, col_C - 30, y_accept - 20, "1", bend="v", bend_pos=730) # L3 to Accept avoids q7
+        self._draw_ortho_arrow(col_L2 + 25, y_row4, col_L1 - 15, y_row3 + 15, "0", bend="v", bend_pos=470) # L3 to M_Left backwards UP
+        
+        # q7
+        self._draw_ortho_arrow(col_C, y_row4 + 25, col_C, y_accept - 25, "0", bend="v") # q7 to Accept
+        self._draw_ortho_arrow(col_C + 25, y_row4, col_R2 - 25, y_row4, "1", bend="vh") # q7 to R3
+        
+        # R3
+        self._draw_ortho_arrow(col_R2 - 15, y_row4 + 15, col_R1 + 15, y_row5 - 15, "1", bend="v", bend_pos=y_row4 + 50) # R3 to BR
+        self._draw_ortho_arrow(col_R2 - 25, y_row4, col_L1 + 15, y_row3 + 15, "0", bend="v", bend_pos=470) # R3 to M_Left backwards UP
+        
+        # Row 5 (BR) -> Accept / Backwards
+        self._draw_ortho_arrow(col_R1, y_row5 + 25, col_C + 20, y_accept - 25, "1", bend="v", bend_pos=750) # BR to Accept avoids q7
+        
+        # BR to M_Left (orthogonal path avoiding q7)
+        path = QPainterPath()
+        path.moveTo(col_R1 - 25, y_row5)
+        path.lineTo(col_C + 50, y_row5)
+        path.lineTo(col_C + 50, 485)
+        path.lineTo(col_L1 + 5, 485)
+        path.lineTo(col_L1 + 5, y_row3 + 20)
+        self.state_scene.addPath(path, QPen(QColor("#6c7086"), 2))
+        
+        # Arrowhead and label for BR -> M_Left
+        x2, y2 = col_L1 + 5, y_row3 + 20
+        arrow_angle = -math.pi/2 # UP
+        arrow_size = 10
+        p1 = QPointF(x2, y2)
+        p2 = QPointF(x2 - arrow_size * math.cos(arrow_angle - math.pi/6), y2 - arrow_size * math.sin(arrow_angle - math.pi/6))
+        p3 = QPointF(x2 - arrow_size * math.cos(arrow_angle + math.pi/6), y2 - arrow_size * math.sin(arrow_angle + math.pi/6))
+        self.state_scene.addPolygon(QPolygonF([p1, p2, p3]), QPen(Qt.PenStyle.NoPen), QBrush(QColor("#6c7086")))
+        
+        text = self.state_scene.addText("0")
+        text.setDefaultTextColor(QColor("#a6adc8"))
+        text.setFont(QFont("Segoe UI", 9))
+        text.setPos(col_C + 55, 470)
+        
+        # Accept loop
+        self._draw_loop_bottom(col_C, y_accept, "0, 1")
     
+    def _draw_loop_bottom(self, cx: float, cy: float, label: str):
+        """Draw a self-loop on the bottom (for Accept nodes)."""
+        path = QPainterPath()
+        path.moveTo(cx - 15, cy + 30)
+        path.cubicTo(cx - 40, cy + 80, cx + 40, cy + 80, cx + 15, cy + 30)
+        self.state_scene.addPath(path, QPen(QColor("#6c7086"), 2))
+        
+        # Arrowhead at (cx + 15, cy + 30)
+        x2, y2 = cx + 15, cy + 30
+        angle = math.atan2(-50, 25)
+        arrow_size = 10
+        p1 = QPointF(x2, y2)
+        p2 = QPointF(x2 - arrow_size * math.cos(angle - math.pi/6), y2 - arrow_size * math.sin(angle - math.pi/6))
+        p3 = QPointF(x2 - arrow_size * math.cos(angle + math.pi/6), y2 - arrow_size * math.sin(angle + math.pi/6))
+        self.state_scene.addPolygon(QPolygonF([p1, p2, p3]), QPen(Qt.PenStyle.NoPen), QBrush(QColor("#6c7086")))
+        
+        self._draw_text(cx - 10, cy + 85, label)
+
     def _draw_loop_left(self, cx: float, cy: float, label: str):
         """Draw a self-loop indicator on the left side."""
         path = QPainterPath()
-        path.moveTo(cx - 25, cy - 10)
-        path.cubicTo(cx - 60, cy - 40, cx - 60, cy + 40, cx - 25, cy + 10)
-        
+        path.moveTo(cx - 15, cy - 10)
+        path.cubicTo(cx - 50, cy - 40, cx - 50, cy + 40, cx - 15, cy + 10)
         self.state_scene.addPath(path, QPen(QColor("#6c7086"), 2))
+        
+        # Arrowhead at (cx - 15, cy + 10)
+        x2, y2 = cx - 15, cy + 10
+        angle = math.atan2(-30, 35)
+        arrow_size = 10
+        p1 = QPointF(x2, y2)
+        p2 = QPointF(x2 - arrow_size * math.cos(angle - math.pi/6), y2 - arrow_size * math.sin(angle - math.pi/6))
+        p3 = QPointF(x2 - arrow_size * math.cos(angle + math.pi/6), y2 - arrow_size * math.sin(angle + math.pi/6))
+        self.state_scene.addPolygon(QPolygonF([p1, p2, p3]), QPen(Qt.PenStyle.NoPen), QBrush(QColor("#6c7086")))
         
         text = self.state_scene.addText(label)
         text.setDefaultTextColor(QColor("#a6adc8"))
         text.setFont(QFont("Segoe UI", 9))
         text.setPos(cx - 75, cy - 8)
     
+    def _draw_ortho_arrow(self, x1: float, y1: float, x2: float, y2: float, label: str, bend="v", bend_pos=None):
+        """Draw an orthogonal arrow with right angles."""
+        path = QPainterPath()
+        path.moveTo(x1, y1)
+        
+        arrow_angle = 0
+        
+        if bend == "v":
+            # vertical -> horizontal -> vertical
+            by = bend_pos if bend_pos is not None else (y1 + y2) / 2
+            path.lineTo(x1, by)
+            path.lineTo(x2, by)
+            path.lineTo(x2, y2)
+            arrow_angle = math.pi/2 if y2 > by else -math.pi/2
+            text_x = (x1 + x2) / 2
+            text_y = by - 15
+            if x1 == x2: text_x += 10
+            
+        elif bend == "h":
+            # horizontal -> vertical -> horizontal
+            bx = bend_pos if bend_pos is not None else (x1 + x2) / 2
+            path.lineTo(bx, y1)
+            path.lineTo(bx, y2)
+            path.lineTo(x2, y2)
+            arrow_angle = 0 if x2 > bx else math.pi
+            text_x = bx
+            text_y = (y1 + y2) / 2 - 15
+            if y1 == y2: text_y -= 10
+            
+        elif bend == "vh":
+            # vertical -> horizontal
+            path.lineTo(x1, y2)
+            path.lineTo(x2, y2)
+            arrow_angle = 0 if x2 > x1 else math.pi
+            text_x = (x1 + x2) / 2
+            text_y = y2 - 15
+            if x1 == x2: text_x += 10
+            if y1 == y2: text_y -= 10
+            
+        elif bend == "hv":
+            # horizontal -> vertical
+            path.lineTo(x2, y1)
+            path.lineTo(x2, y2)
+            arrow_angle = math.pi/2 if y2 > y1 else -math.pi/2
+            text_x = x2
+            text_y = (y1 + y2) / 2 - 15
+            if x1 == x2: text_x += 10
+            if y1 == y2: text_y -= 10
+            
+        self.state_scene.addPath(path, QPen(QColor("#6c7086"), 2))
+        
+        # Draw arrowhead
+        arrow_size = 10
+        p1 = QPointF(x2, y2)
+        p2 = QPointF(x2 - arrow_size * math.cos(arrow_angle - math.pi/6), 
+                     y2 - arrow_size * math.sin(arrow_angle - math.pi/6))
+        p3 = QPointF(x2 - arrow_size * math.cos(arrow_angle + math.pi/6), 
+                     y2 - arrow_size * math.sin(arrow_angle + math.pi/6))
+        self.state_scene.addPolygon(QPolygonF([p1, p2, p3]), QPen(Qt.PenStyle.NoPen), QBrush(QColor("#6c7086")))
+        
+        if label:
+            text = self.state_scene.addText(label)
+            text.setDefaultTextColor(QColor("#a6adc8"))
+            text.setFont(QFont("Segoe UI", 9))
+            rect = text.boundingRect()
+            if bend in ("v", "vh"):
+                text.setPos(text_x - rect.width()/2, text_y - rect.height()/2)
+            else:
+                text.setPos(text_x + 5, text_y - rect.height()/2)
+
     def _draw_arrow(self, x1: float, y1: float, x2: float, y2: float, label: str):
         """Draw an arrow between two points."""
         # Line
@@ -692,6 +972,45 @@ class PDAPanel(QWidget):
             text.setDefaultTextColor(QColor("#a6adc8"))
             text.setFont(QFont("Segoe UI", 9))
             text.setPos(mid_x + 5, mid_y - 10)
+
+    def _draw_curved_arrow(self, x1: float, y1: float, x2: float, y2: float, label: str, offset: float = 40):
+        """Draw a curved arrow between two vertical points, bulging out."""
+        path = QPainterPath()
+        path.moveTo(x1, y1)
+        
+        mid_y = (y1 + y2) / 2
+        path.quadTo(x1 + offset, mid_y, x2, y2)
+        
+        self.state_scene.addPath(path, QPen(QColor("#6c7086"), 2))
+        
+        angle = math.atan2(y2 - mid_y, x2 - (x1 + offset*0.5)) 
+        arrow_size = 10
+        
+        p1 = QPointF(x2, y2)
+        p2 = QPointF(
+            x2 - arrow_size * math.cos(angle - math.pi/6),
+            y2 - arrow_size * math.sin(angle - math.pi/6)
+        )
+        p3 = QPointF(
+            x2 - arrow_size * math.cos(angle + math.pi/6),
+            y2 - arrow_size * math.sin(angle + math.pi/6)
+        )
+        
+        polygon = QPolygonF([p1, p2, p3])
+        self.state_scene.addPolygon(
+            polygon,
+            QPen(Qt.PenStyle.NoPen),
+            QBrush(QColor("#6c7086"))
+        )
+        
+        if label:
+            text = self.state_scene.addText(label)
+            text.setDefaultTextColor(QColor("#a6adc8"))
+            text.setFont(QFont("Segoe UI", 9))
+            max_x = x1 + offset * 0.5
+            # Place label outside the furthest point of the curve
+            padding = 5 if offset > 0 else -20
+            text.setPos(max_x + padding, mid_y - 10)
     
     def _draw_text(self, x: float, y: float, text: str):
         """Draw text at a position."""
@@ -702,14 +1021,20 @@ class PDAPanel(QWidget):
     
     def _draw_loop(self, cx: float, cy: float, label: str):
         """Draw a self-loop indicator."""
-        # Draw curved arrow indicating self-loop
         path = QPainterPath()
-        path.moveTo(cx + 25, cy - 10)
-        path.cubicTo(cx + 60, cy - 40, cx + 60, cy + 40, cx + 25, cy + 10)
-        
+        path.moveTo(cx + 15, cy - 10)
+        path.cubicTo(cx + 50, cy - 40, cx + 50, cy + 40, cx + 15, cy + 10)
         self.state_scene.addPath(path, QPen(QColor("#6c7086"), 2))
         
-        # Label
+        # Arrowhead at (cx + 15, cy + 10)
+        x2, y2 = cx + 15, cy + 10
+        angle = math.atan2(-30, -35)
+        arrow_size = 10
+        p1 = QPointF(x2, y2)
+        p2 = QPointF(x2 - arrow_size * math.cos(angle - math.pi/6), y2 - arrow_size * math.sin(angle - math.pi/6))
+        p3 = QPointF(x2 - arrow_size * math.cos(angle + math.pi/6), y2 - arrow_size * math.sin(angle + math.pi/6))
+        self.state_scene.addPolygon(QPolygonF([p1, p2, p3]), QPen(Qt.PenStyle.NoPen), QBrush(QColor("#6c7086")))
+        
         text = self.state_scene.addText(label)
         text.setDefaultTextColor(QColor("#a6adc8"))
         text.setFont(QFont("Segoe UI", 9))
@@ -781,6 +1106,7 @@ class PDAPanel(QWidget):
         if self.engine.get_dfa_graph_data():
             initial = self.engine.get_dfa_graph_data()['initial_state']
             self.current_state_label.setText(f"Current State: {initial}")
+            self._highlight_state(initial)
     
     def _on_play(self):
         """Start continuous animation."""
@@ -835,6 +1161,7 @@ class PDAPanel(QWidget):
         self.current_state_label.setStyleSheet(
             "background-color: #313244; padding: 8px; border-radius: 4px; font-weight: bold;"
         )
+        self._reset_diagram_highlights()
         self.transition_label.setText("δ(state, input, stack_top) → (new_state, stack_operation)")
         self.transition_label.setStyleSheet(
             "font-family: 'Cascadia Code'; font-size: 13px; padding: 10px;"
@@ -867,6 +1194,9 @@ class PDAPanel(QWidget):
         """Execute a single transition step."""
         # Update current state
         self.current_state_label.setText(f"Current State: {step.to_state}")
+
+        # Highlight the corresponding flowchart node
+        self._highlight_state(step.to_state)
         
         # Update stack visualization
         self.stack_view.set_stack(step.stack_after)
@@ -950,6 +1280,10 @@ class PDAPanel(QWidget):
                     '<span style="color: #a6e3a1; font-weight: bold;">'
                     '✓ STRING ACCEPTED</span>'
                 )
+                # Highlight the final state and accept node on the diagram
+                self._highlight_state(
+                    self._current_result.final_state, accept_final=True
+                )
             else:
                 self.current_state_label.setStyleSheet(
                     "background-color: #3a1e2f; padding: 8px; border-radius: 4px; "
@@ -959,6 +1293,7 @@ class PDAPanel(QWidget):
                     '<span style="color: #f38ba8; font-weight: bold;">'
                     '✗ STRING REJECTED</span>'
                 )
+                self._highlight_state(self._current_result.final_state)
             
             self.animation_finished.emit(self._current_result.accepted)
     

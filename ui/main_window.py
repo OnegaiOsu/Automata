@@ -184,6 +184,7 @@ class MainWindow(QMainWindow):
         
         # Animation finished signals
         self.dfa_panel.animation_finished.connect(self._on_animation_finished)
+        self.cfg_panel.animation_finished.connect(self._on_animation_finished)
         self.pda_panel.animation_finished.connect(self._on_animation_finished)
     
     def _switch_view(self, index: int):
@@ -240,8 +241,10 @@ class MainWindow(QMainWindow):
     def _on_test_string(self):
         """Handle test string button click."""
         input_string = self.string_input.text().strip()
+        if input_string.lower() == "null" or input_string == "ε":
+            input_string = ""
         
-        if not input_string:
+        if not input_string and self.string_input.text().strip().lower() != "null" and self.string_input.text().strip() != "ε" and self.string_input.text().strip() != "":
             QMessageBox.information(
                 self,
                 "Input Required",
@@ -269,17 +272,10 @@ class MainWindow(QMainWindow):
         
         if current_tab == 0:  # DFA
             self.dfa_panel.process_string(input_string)
+        elif current_tab == 1:  # CFG
+            self.cfg_panel.process_string(input_string)
         elif current_tab == 2:  # PDA
             self.pda_panel.process_string(input_string)
-        else:
-            # For CFG, just show result
-            if is_valid:
-                self.result_label.setText("ACCEPTED")
-                self.result_label.setObjectName("accepted")
-            else:
-                self.result_label.setText("REJECTED")
-                self.result_label.setObjectName("rejected")
-            self.result_label.setStyle(self.result_label.style())
     
     def _on_animation_finished(self, accepted: bool):
         """Handle animation completion."""

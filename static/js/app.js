@@ -10,6 +10,37 @@ const state = {
   stepIndex: -1,        // currently highlighted step
   playing: false,
   timer: null,
+  lastInput: '',        // saved input for trace display
+};
+
+const EXPR1_STATE_TO_NODE = {
+  '-':  'R0',
+  'q1': 'RR1',
+  'q2': 'RL1',
+  'q3': 'RR2',
+  'q4': 'RL2',
+  'T':  'Reject',
+  'q5': 'L1A', 
+  'q6': 'B1',
+  'q7': 'B2',
+  'q8': 'B3',
+  '+':  'Accept',
+};
+
+const EXPR2_STATE_TO_NODE = {
+  '-': 'R0',
+  'q1': 'L1',
+  'q3': 'R1',
+  'q2': 'L2',
+  'q8': 'R2',
+  'q10': 'R2',
+  'q5': 'M1',
+  'q6': 'M2',
+  'q4': 'L3',
+  'q7': 'T1',
+  'q9': 'M1',
+  '+': 'Accept',
+  'T': 'Reject'
 };
 
 function getApiBase() {
@@ -104,6 +135,20 @@ async function renderDFA(dot) {
   container.appendChild(svg);
 }
 
+async function renderDotToContainer(dot, containerId) {
+  const container = $(containerId);
+  if (!container) return;
+  try {
+    const viz = await getViz();
+    const svg = viz.renderSVGElement(dot);
+    applyDarkThemeSVG(svg);
+    container.innerHTML = '';
+    container.appendChild(svg);
+  } catch(e) {
+    console.error(e);
+  }
+}
+
 function buildPdaDot(pda) {
   const borderColor = {
     start:    '#89b4fa',
@@ -158,21 +203,171 @@ function buildPdaDot(pda) {
   return lines.join('\n');
 }
 
-async function renderPDA(pda) {
+function renderPDA(pda) {
   const container = $('pda-graph');
-  container.innerHTML = '<span style="color:#6c7086">Rendering…</span>';
-  const viz = await getViz();
-  const svg = viz.renderSVGElement(buildPdaDot(pda));
-  applyDarkThemeSVG(svg);
+  const isExpr2 = state.current && state.current.name.includes('0,1');
+  const svg = renderPDASvg(isExpr2);
   container.innerHTML = '';
   container.appendChild(svg);
   // Always start at the top of tall PDA diagrams
   container.scrollTop = 0;
 }
 
-function renderCFG(text) {
+function buildCfgDot(rules) {
+  const ruleMap = {};
+  for (const r of rules) {
+    if (!ruleMap[r.left]) ruleMap[r.left] = [];
+    ruleMap[r.left].push(...r.right);
+  }
+  
+  let nodeCounter = 0;
+  const lines = [
+    'digraph CFGTree {',
+    '  bgcolor="transparent";',
+    '  rankdir=TB;',
+    '  node [shape=none, fontname="Helvetica", fontsize=14, margin=0];',
+    '  edge [color="#6c7086"];',
+  ];
+  
+  function expand(symbol, currentDepth, maxDepth) {
+    const nodeId = `node${nodeCounter++}`;
+    const isTerminal = !(symbol in ruleMap);
+    const isEpsilon = (symbol === 'ε');
+    
+    let color = isEpsilon ? '#cba6f7' : (isTerminal ? '#a6e3a1' : '#89b4fa');
+    let fontWeight = (isTerminal || isEpsilon) ? '' : ' bold';
+    
+    lines.push(`  ${nodeId} [label=<<font color="${color}"><b>${symbol}</b></font>>];`);
+    
+    if (!isTerminal && currentDepth < maxDepth) {
+      const production = ruleMap[symbol][0];
+      let childrenIds = [];
+      let i = 0;
+      while (i < production.length) {
+        let char = production[i];
+        if (char === 'ε') {
+          childrenIds.push(expand('ε', currentDepth + 1, maxDepth));
+          i++;
+        } else if (char >= 'A' && char <= 'Z') {
+          let varName = char;
+          let j = i + 1;
+          while (j < production.length && production[j] >= '0' && production[j] <= '9') {
+            varName += production[j];
+            j++;
+          }
+          childrenIds.push(expand(varName, currentDepth + 1, maxDepth));
+          i = j;
+        } else {
+          childrenIds.push(expand(char, currentDepth + 1, maxDepth));
+          i++;
+        }
+      }
+      for (const childId of childrenIds) {
+        lines.push(`  ${nodeId} -> ${childId};`);
+      }
+    }
+    return nodeId;
+  }
+  
+  if (Object.keys(ruleMap).length > 0) {
+    expand('S', 0, 3);
+  }
+  
+  lines.push('}');
+  return lines.join('\n');
+}
+
+function buildDerivationDot(steps, currentIdx) {
+  let nodeCounter = 0;
+  const lines = [
+    'digraph CFGTree {',
+    '  bgcolor="transparent";',
+    '  rankdir=TB;',
+    '  node [shape=none, fontname="Helvetica", fontsize=14, margin=0];',
+    '  edge [color="#6c7086"];',
+  ];
+
+  // We maintain a tree structure: { id, symbol, children: [], isTerminal }
+  const root = { id: `node${nodeCounter++}`, symbol: 'S', children: [], isTerminal: false };
+  
+  function getLeftmostNonTerminal(node) {
+    if (!node.isTerminal && node.children.length === 0 && node.symbol !== 'ε') {
+      return node;
+    }
+    for (const child of node.children) {
+      const found = getLeftmostNonTerminal(child);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  for (let s = 0; s <= currentIdx; s++) {
+    const step = steps[s];
+    if (!step.rule_left) continue; // Final accept step has no rule
+    
+    const targetNode = getLeftmostNonTerminal(root);
+    if (!targetNode) break;
+
+    const right = step.rule_right;
+    let i = 0;
+    while (i < right.length) {
+      let char = right[i];
+      if (char === 'ε') {
+        targetNode.children.push({ id: `node${nodeCounter++}`, symbol: 'ε', children: [], isTerminal: true });
+        i++;
+      } else if (char >= 'A' && char <= 'Z') {
+        let varName = char;
+        let j = i + 1;
+        while (j < right.length && right[j] >= '0' && right[j] <= '9') {
+          varName += right[j];
+          j++;
+        }
+        targetNode.children.push({ id: `node${nodeCounter++}`, symbol: varName, children: [], isTerminal: false });
+        i = j;
+      } else {
+        targetNode.children.push({ id: `node${nodeCounter++}`, symbol: char, children: [], isTerminal: true });
+        i++;
+      }
+    }
+  }
+
+  function emit(node, isNewlyExpanded) {
+    const isEpsilon = (node.symbol === 'ε');
+    let color = isEpsilon ? '#cba6f7' : (node.isTerminal ? '#a6e3a1' : '#89b4fa');
+    let highlight = isNewlyExpanded ? 'bgcolor="#a6e3a1" color="#1e1e2e"' : '';
+    
+    lines.push(`  ${node.id} [label=<<font color="${color}" ${highlight}><b>${node.symbol}</b></font>>];`);
+    
+    for (const child of node.children) {
+      emit(child, isNewlyExpanded ? false : (node === getLeftmostNonTerminal(root))); // Not perfectly highlighting the active node, but we can just emit everything
+      lines.push(`  ${node.id} -> ${child.id};`);
+    }
+  }
+
+  // To highlight the actively expanded node, we could find the one expanded at currentIdx, but simple render is fine for now
+  emit(root, false);
+
+  lines.push('}');
+  return lines.join('\n');
+}
+
+async function renderCFG(text, rules) {
   const el = $('cfg-text');
   el.innerHTML = colorizeCFG(text);
+  
+  const container = $('cfg-graph');
+  if (container && rules) {
+    container.innerHTML = '<span style="color:#6c7086">Rendering tree…</span>';
+    try {
+      const viz = await getViz();
+      const svg = viz.renderSVGElement(buildCfgDot(rules));
+      applyDarkThemeSVG(svg);
+      container.innerHTML = '';
+      container.appendChild(svg);
+    } catch (e) {
+      container.innerHTML = `<span style="color:#f38ba8">Error rendering tree: ${e.message}</span>`;
+    }
+  }
 }
 
 /**
@@ -246,6 +441,9 @@ function findNode(svgRoot, label) {
   for (const t of titles) {
     if (t.textContent === label) return t.parentNode;
   }
+  // Fallback for custom PDA SVG which uses id attribute
+  const el = svgRoot.querySelector(`g.node[id="${label}"]`);
+  if (el) return el;
   return null;
 }
 
@@ -264,9 +462,20 @@ function highlightStep(panelId, step, prevStep) {
   // Clear previous highlights
   svg.querySelectorAll('.node.active, .edge.active').forEach(n => n.classList.remove('active'));
   if (!step) return;
-  const fromNode = findNode(svg, step.from_state);
-  const toNode = findNode(svg, step.to_state);
-  const edge = findEdge(svg, step.from_state, step.to_state);
+  
+  let fromState = step.from_state;
+  let toState = step.to_state;
+  
+  if (panelId === 'pda-graph') {
+    const isExpr2 = state.current && state.current.name.includes('0,1');
+    const mapping = isExpr2 ? EXPR2_STATE_TO_NODE : EXPR1_STATE_TO_NODE;
+    fromState = mapping[fromState] || fromState;
+    toState = mapping[toState] || toState;
+  }
+  
+  const fromNode = findNode(svg, fromState);
+  const toNode = findNode(svg, toState);
+  const edge = findEdge(svg, fromState, toState);
   if (fromNode) fromNode.classList.add('active');
   if (toNode) toNode.classList.add('active');
   if (edge) edge.classList.add('active');
@@ -285,14 +494,22 @@ function renderStack(symbols, highlightKind) {
 }
 
 function renderTrace(panelId, steps, currentIdx) {
-  const el = $(panelId === 'view-dfa' ? 'dfa-trace' : 'pda-trace');
+  const el = $(panelId === 'view-dfa' ? 'dfa-trace' : (panelId === 'view-cfg' ? 'cfg-trace' : 'pda-trace'));
   el.innerHTML = '';
   steps.forEach((s, i) => {
     const div = document.createElement('div');
     div.className = 'step' + (i === currentIdx ? ' current' : '');
-    let line = `${String(s.step_number).padStart(2, ' ')}.  ${s.from_state}  --${s.symbol}-->  ${s.to_state}`;
-    if (s.pda_action) line += `   [${s.pda_action}]`;
-    div.textContent = line;
+    
+    if (s.rule_left !== undefined) {
+      // CFG trace
+      div.textContent = `${String(s.step_number).padStart(2, ' ')}. ${s.rule_left ? (s.rule_left + ' -> ' + s.rule_right) : 'Matched!'}   (Current: ${s.current_string})`;
+    } else {
+      // DFA / PDA trace
+      let line = `${String(s.step_number).padStart(2, ' ')}.  ${s.from_state}  --${s.symbol}-->  ${s.to_state}`;
+      if (s.pda_action) line += `   [${s.pda_action}]`;
+      div.textContent = line;
+    }
+    
     el.appendChild(div);
   });
 }
@@ -304,10 +521,20 @@ function resetRun() {
   stopPlaying();
   clearHighlights('#dfa-graph');
   clearHighlights('#pda-graph');
+  if (state.automaton && state.automaton.cfg) {
+    const dot = buildCfgDot(state.automaton.cfg.rules);
+    renderDotToContainer(dot, 'cfg-graph');
+  }
   renderTrace('view-dfa', [], -1);
   renderTrace('view-pda', [], -1);
+  renderTrace('view-cfg', [], -1);
   renderStack(['Z'], null);
   setResult('', '');
+  
+  const inputEl = $('pda-input-string');
+  if (inputEl) inputEl.textContent = state.lastInput || '';
+  const transEl = $('pda-current-transition');
+  if (transEl) transEl.textContent = 'Waiting to start...';
 }
 
 function stopPlaying() {
@@ -326,8 +553,22 @@ function applyStep(idx) {
                  : step.stack_after.length < step.stack_before.length ? 'popped'
                  : null;
       renderStack(step.stack_after, kind);
+      
+      const inputEl = $('pda-input-string');
+      if (inputEl) {
+        inputEl.innerHTML = `<span style="color: #6c7086;">${state.lastInput.substring(0, step.step_number)}</span><span style="color: #cdd6f4;">${state.lastInput.substring(step.step_number)}</span>`;
+      }
+      
+      const transEl = $('pda-current-transition');
+      if (transEl) {
+        transEl.innerHTML = `Step ${step.step_number}: <b>${step.from_state}</b> &rarr; <b>${step.symbol}</b> &rarr; <b>${step.to_state}</b><br/><span style="color:#89b4fa; font-size: 0.9em;">[${step.pda_action || 'No stack change'}]</span>`;
+      }
     }
     renderTrace('view-pda', state.steps, idx);
+  } else if (state.mode === 'cfg') {
+    const dot = buildDerivationDot(state.steps, idx);
+    renderDotToContainer(dot, 'cfg-graph');
+    renderTrace('view-cfg', state.steps, idx);
   } else {
     highlightStep('dfa-graph', step, prev);
     renderTrace('view-dfa', state.steps, idx);
@@ -380,13 +621,13 @@ async function loadExpression(name) {
   const auto = await fetchAutomaton(name);
   state.automaton = auto;
   await renderDFA(auto.dfa.dot);
-  renderCFG(auto.cfg.text);
+  renderCFG(auto.cfg.text, auto.cfg.rules);
   await renderPDA(auto.pda);
   resetRun();
 }
 
 function switchView(view) {
-  state.mode = view === 'pda' ? 'pda' : (view === 'dfa' ? 'dfa' : state.mode);
+  state.mode = view;
   document.querySelectorAll('.view-btn').forEach(b =>
     b.classList.toggle('active', b.dataset.view === view));
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
@@ -395,11 +636,15 @@ function switchView(view) {
 
 async function onTest() {
   const input = $('input').value.trim();
-  if (!input) { setResult('Enter a string', 'rejected'); return; }
+  if (!input && input.toLowerCase() !== "null" && input !== "ε") { setResult('Enter a string', 'rejected'); return; }
   // Determine which mode is active based on currently visible panel.
   const activePanel = document.querySelector('.panel.active').id;
-  const mode = activePanel === 'view-pda' ? 'pda' : 'dfa';
+  let mode = 'dfa';
+  if (activePanel === 'view-pda') mode = 'pda';
+  else if (activePanel === 'view-cfg') mode = 'cfg';
+  
   state.mode = mode;
+  state.lastInput = input;
   resetRun();
   const res = await processString(state.current.name, input, mode);
   state.lastResult = res;
@@ -409,7 +654,7 @@ async function onTest() {
     return;
   }
   state.steps = res.steps;
-  if (mode === 'cfg' || !state.steps.length) {
+  if (!state.steps.length) {
     announceResult();
   } else {
     play(activePanel);
@@ -433,12 +678,19 @@ async function init() {
     btn.addEventListener('click', () => switchView(btn.dataset.view));
   });
 
-  $('dfa-play').addEventListener('click', () => { state.mode = 'dfa'; play('view-dfa'); });
-  $('dfa-step').addEventListener('click', () => { state.mode = 'dfa'; stepOnce(); });
-  $('dfa-reset').addEventListener('click', resetRun);
-  $('pda-play').addEventListener('click', () => { state.mode = 'pda'; play('view-pda'); });
-  $('pda-step').addEventListener('click', () => { state.mode = 'pda'; stepOnce(); });
-  $('pda-reset').addEventListener('click', resetRun);
+  const btn = (id, fn) => { const el = $(id); if (el) el.addEventListener('click', fn); };
+  btn('dfa-play', () => { state.mode = 'dfa'; play('view-dfa'); });
+  btn('dfa-stop', stopPlaying);
+  btn('dfa-step', () => { state.mode = 'dfa'; stepOnce(); });
+  btn('dfa-reset', resetRun);
+  btn('cfg-play', () => { state.mode = 'cfg'; play('view-cfg'); });
+  btn('cfg-stop', stopPlaying);
+  btn('cfg-step', () => { state.mode = 'cfg'; stepOnce(); });
+  btn('cfg-reset', resetRun);
+  btn('pda-play', () => { state.mode = 'pda'; play('view-pda'); });
+  btn('pda-stop', stopPlaying);
+  btn('pda-step', () => { state.mode = 'pda'; stepOnce(); });
+  btn('pda-reset', resetRun);
 
   if (state.expressions.length) await loadExpression(state.expressions[0].name);
 }
