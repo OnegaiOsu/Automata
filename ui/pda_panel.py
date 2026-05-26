@@ -308,6 +308,7 @@ class PDAPanel(QWidget):
         self._animation_frame = 0
         self._is_animating = False
         self._diagram_nodes: dict[str, FlowchartNode] = {}
+        self._diagram_edges = {}
         
         self._setup_ui()
     
@@ -478,6 +479,7 @@ class PDAPanel(QWidget):
         self.state_scene.clear()
         self._flowchart_nodes = {}
         self._diagram_nodes: dict[str, FlowchartNode] = {}
+        self._diagram_edges = {}
         data = self.engine.get_dfa_graph_data()
         if not data:
             text = self.state_scene.addText("No PDA loaded. Select an expression above.")
@@ -544,8 +546,7 @@ class PDAPanel(QWidget):
 
     def _highlight_state(self, state: str, *, accept_final: bool = False):
         """Reset all flowchart nodes and highlight the one for `state`."""
-        for node in self._diagram_nodes.values():
-            node.reset_appearance()
+        self._reset_diagram_highlights()
         key = self._state_to_node_key(state)
         if key:
             keys = key if isinstance(key, list) else [key]
@@ -559,6 +560,46 @@ class PDAPanel(QWidget):
         """Clear all flowchart highlights."""
         for node in self._diagram_nodes.values():
             node.reset_appearance()
+        if hasattr(self, '_diagram_edges'):
+            for items in self._diagram_edges.values():
+                for item in items:
+                    if isinstance(item, QGraphicsPathItem):
+                        item.setPen(QPen(QColor("#6c7086"), 2))
+                    elif isinstance(item, QGraphicsPolygonItem):
+                        item.setBrush(QBrush(QColor("#6c7086")))
+                    elif isinstance(item, QGraphicsTextItem):
+                        item.setDefaultTextColor(QColor("#a6adc8"))
+
+    def _find_nearest_node(self, x: float, y: float) -> Optional[str]:
+        best = None
+        best_dist = float('inf')
+        for key, node in self._diagram_nodes.items():
+            dist = (node.x - x)**2 + (node.y - y)**2
+            if dist < best_dist:
+                best_dist = dist
+                best = key
+        return best
+
+    def _register_edge(self, x1, y1, x2, y2, items):
+        if not hasattr(self, '_diagram_edges'):
+            self._diagram_edges = {}
+        from_node = self._find_nearest_node(x1, y1)
+        to_node = self._find_nearest_node(x2, y2)
+        if from_node and to_node:
+            edge_id = f"{from_node}->{to_node}"
+            if edge_id not in self._diagram_edges:
+                self._diagram_edges[edge_id] = []
+            self._diagram_edges[edge_id].extend([it for it in items if it])
+
+    def _highlight_edge(self, edge_id: str):
+        if hasattr(self, '_diagram_edges') and edge_id in self._diagram_edges:
+            for item in self._diagram_edges[edge_id]:
+                if isinstance(item, QGraphicsPathItem):
+                    item.setPen(QPen(QColor("#a6e3a1"), 3))
+                elif isinstance(item, QGraphicsPolygonItem):
+                    item.setBrush(QBrush(QColor("#a6e3a1")))
+                elif isinstance(item, QGraphicsTextItem):
+                    item.setDefaultTextColor(QColor("#a6e3a1"))
     def _build_expression1_flowchart(self):
         """Build flowchart for Expression 1 exactly matching the user's reference image."""
         self.state_scene.clear()
@@ -810,7 +851,7 @@ class PDAPanel(QWidget):
         path.lineTo(col_C + 50, 485)
         path.lineTo(col_L1 + 5, 485)
         path.lineTo(col_L1 + 5, y_row3 + 20)
-        self.state_scene.addPath(path, QPen(QColor("#6c7086"), 2))
+        path_item = self.state_scene.addPath(path, QPen(QColor("#6c7086"), 2))
         
         # Arrowhead and label for BR -> M_Left
         x2, y2 = col_L1 + 5, y_row3 + 20
@@ -819,12 +860,13 @@ class PDAPanel(QWidget):
         p1 = QPointF(x2, y2)
         p2 = QPointF(x2 - arrow_size * math.cos(arrow_angle - math.pi/6), y2 - arrow_size * math.sin(arrow_angle - math.pi/6))
         p3 = QPointF(x2 - arrow_size * math.cos(arrow_angle + math.pi/6), y2 - arrow_size * math.sin(arrow_angle + math.pi/6))
-        self.state_scene.addPolygon(QPolygonF([p1, p2, p3]), QPen(Qt.PenStyle.NoPen), QBrush(QColor("#6c7086")))
+        arrow_item = self.state_scene.addPolygon(QPolygonF([p1, p2, p3]), QPen(Qt.PenStyle.NoPen), QBrush(QColor("#6c7086")))
         
         text = self.state_scene.addText("0")
         text.setDefaultTextColor(QColor("#a6adc8"))
         text.setFont(QFont("Segoe UI", 9))
         text.setPos(col_C + 55, 470)
+        self._register_edge(col_R1 - 25, y_row5, col_L1 + 5, y_row3 + 20, [path_item, arrow_item, text])
         
         # Accept loop
         self._draw_loop_bottom(col_C, y_accept, "0, 1")
@@ -834,7 +876,7 @@ class PDAPanel(QWidget):
         path = QPainterPath()
         path.moveTo(cx - 15, cy + 30)
         path.cubicTo(cx - 40, cy + 80, cx + 40, cy + 80, cx + 15, cy + 30)
-        self.state_scene.addPath(path, QPen(QColor("#6c7086"), 2))
+        path_item = self.state_scene.addPath(path, QPen(QColor("#6c7086"), 2))
         
         # Arrowhead at (cx + 15, cy + 30)
         x2, y2 = cx + 15, cy + 30
@@ -843,16 +885,17 @@ class PDAPanel(QWidget):
         p1 = QPointF(x2, y2)
         p2 = QPointF(x2 - arrow_size * math.cos(angle - math.pi/6), y2 - arrow_size * math.sin(angle - math.pi/6))
         p3 = QPointF(x2 - arrow_size * math.cos(angle + math.pi/6), y2 - arrow_size * math.sin(angle + math.pi/6))
-        self.state_scene.addPolygon(QPolygonF([p1, p2, p3]), QPen(Qt.PenStyle.NoPen), QBrush(QColor("#6c7086")))
+        arrow_item = self.state_scene.addPolygon(QPolygonF([p1, p2, p3]), QPen(Qt.PenStyle.NoPen), QBrush(QColor("#6c7086")))
         
-        self._draw_text(cx - 10, cy + 85, label)
+        text_item = self._draw_text(cx - 10, cy + 85, label)
+        self._register_edge(cx, cy, cx, cy, [path_item, arrow_item, text_item])
 
     def _draw_loop_left(self, cx: float, cy: float, label: str):
         """Draw a self-loop indicator on the left side."""
         path = QPainterPath()
         path.moveTo(cx - 15, cy - 10)
         path.cubicTo(cx - 50, cy - 40, cx - 50, cy + 40, cx - 15, cy + 10)
-        self.state_scene.addPath(path, QPen(QColor("#6c7086"), 2))
+        path_item = self.state_scene.addPath(path, QPen(QColor("#6c7086"), 2))
         
         # Arrowhead at (cx - 15, cy + 10)
         x2, y2 = cx - 15, cy + 10
@@ -861,12 +904,13 @@ class PDAPanel(QWidget):
         p1 = QPointF(x2, y2)
         p2 = QPointF(x2 - arrow_size * math.cos(angle - math.pi/6), y2 - arrow_size * math.sin(angle - math.pi/6))
         p3 = QPointF(x2 - arrow_size * math.cos(angle + math.pi/6), y2 - arrow_size * math.sin(angle + math.pi/6))
-        self.state_scene.addPolygon(QPolygonF([p1, p2, p3]), QPen(Qt.PenStyle.NoPen), QBrush(QColor("#6c7086")))
+        arrow_item = self.state_scene.addPolygon(QPolygonF([p1, p2, p3]), QPen(Qt.PenStyle.NoPen), QBrush(QColor("#6c7086")))
         
         text = self.state_scene.addText(label)
         text.setDefaultTextColor(QColor("#a6adc8"))
         text.setFont(QFont("Segoe UI", 9))
         text.setPos(cx - 75, cy - 8)
+        self._register_edge(cx, cy, cx, cy, [path_item, arrow_item, text])
     
     def _draw_ortho_arrow(self, x1: float, y1: float, x2: float, y2: float, label: str, bend="v", bend_pos=None):
         """Draw an orthogonal arrow with right angles."""
@@ -917,7 +961,7 @@ class PDAPanel(QWidget):
             if x1 == x2: text_x += 10
             if y1 == y2: text_y -= 10
             
-        self.state_scene.addPath(path, QPen(QColor("#6c7086"), 2))
+        path_item = self.state_scene.addPath(path, QPen(QColor("#6c7086"), 2))
         
         # Draw arrowhead
         arrow_size = 10
@@ -926,8 +970,9 @@ class PDAPanel(QWidget):
                      y2 - arrow_size * math.sin(arrow_angle - math.pi/6))
         p3 = QPointF(x2 - arrow_size * math.cos(arrow_angle + math.pi/6), 
                      y2 - arrow_size * math.sin(arrow_angle + math.pi/6))
-        self.state_scene.addPolygon(QPolygonF([p1, p2, p3]), QPen(Qt.PenStyle.NoPen), QBrush(QColor("#6c7086")))
+        arrow_item = self.state_scene.addPolygon(QPolygonF([p1, p2, p3]), QPen(Qt.PenStyle.NoPen), QBrush(QColor("#6c7086")))
         
+        text = None
         if label:
             text = self.state_scene.addText(label)
             text.setDefaultTextColor(QColor("#a6adc8"))
@@ -937,11 +982,12 @@ class PDAPanel(QWidget):
                 text.setPos(text_x - rect.width()/2, text_y - rect.height()/2)
             else:
                 text.setPos(text_x + 5, text_y - rect.height()/2)
+        self._register_edge(x1, y1, x2, y2, [path_item, arrow_item, text])
 
     def _draw_arrow(self, x1: float, y1: float, x2: float, y2: float, label: str):
         """Draw an arrow between two points."""
         # Line
-        self.state_scene.addLine(x1, y1, x2, y2, QPen(QColor("#6c7086"), 2))
+        path_item = self.state_scene.addLine(x1, y1, x2, y2, QPen(QColor("#6c7086"), 2))
         
         # Arrow head
         angle = math.atan2(y2 - y1, x2 - x1)
@@ -958,7 +1004,7 @@ class PDAPanel(QWidget):
         )
         
         polygon = QPolygonF([p1, p2, p3])
-        self.state_scene.addPolygon(
+        arrow_item = self.state_scene.addPolygon(
             polygon,
             QPen(Qt.PenStyle.NoPen),
             QBrush(QColor("#6c7086"))
@@ -972,6 +1018,7 @@ class PDAPanel(QWidget):
             text.setDefaultTextColor(QColor("#a6adc8"))
             text.setFont(QFont("Segoe UI", 9))
             text.setPos(mid_x + 5, mid_y - 10)
+        self._register_edge(x1, y1, x2, y2, [path_item, arrow_item, text if label else None])
 
     def _draw_curved_arrow(self, x1: float, y1: float, x2: float, y2: float, label: str, offset: float = 40):
         """Draw a curved arrow between two vertical points, bulging out."""
@@ -981,7 +1028,7 @@ class PDAPanel(QWidget):
         mid_y = (y1 + y2) / 2
         path.quadTo(x1 + offset, mid_y, x2, y2)
         
-        self.state_scene.addPath(path, QPen(QColor("#6c7086"), 2))
+        path_item = self.state_scene.addPath(path, QPen(QColor("#6c7086"), 2))
         
         angle = math.atan2(y2 - mid_y, x2 - (x1 + offset*0.5)) 
         arrow_size = 10
@@ -997,7 +1044,7 @@ class PDAPanel(QWidget):
         )
         
         polygon = QPolygonF([p1, p2, p3])
-        self.state_scene.addPolygon(
+        arrow_item = self.state_scene.addPolygon(
             polygon,
             QPen(Qt.PenStyle.NoPen),
             QBrush(QColor("#6c7086"))
@@ -1011,6 +1058,7 @@ class PDAPanel(QWidget):
             # Place label outside the furthest point of the curve
             padding = 5 if offset > 0 else -20
             text.setPos(max_x + padding, mid_y - 10)
+        self._register_edge(x1, y1, x2, y2, [path_item, arrow_item, text if label else None])
     
     def _draw_text(self, x: float, y: float, text: str):
         """Draw text at a position."""
@@ -1018,13 +1066,14 @@ class PDAPanel(QWidget):
         item.setDefaultTextColor(QColor("#a6adc8"))
         item.setFont(QFont("Segoe UI", 9))
         item.setPos(x, y)
+        return item
     
     def _draw_loop(self, cx: float, cy: float, label: str):
         """Draw a self-loop indicator."""
         path = QPainterPath()
         path.moveTo(cx + 15, cy - 10)
         path.cubicTo(cx + 50, cy - 40, cx + 50, cy + 40, cx + 15, cy + 10)
-        self.state_scene.addPath(path, QPen(QColor("#6c7086"), 2))
+        path_item = self.state_scene.addPath(path, QPen(QColor("#6c7086"), 2))
         
         # Arrowhead at (cx + 15, cy + 10)
         x2, y2 = cx + 15, cy + 10
@@ -1033,12 +1082,13 @@ class PDAPanel(QWidget):
         p1 = QPointF(x2, y2)
         p2 = QPointF(x2 - arrow_size * math.cos(angle - math.pi/6), y2 - arrow_size * math.sin(angle - math.pi/6))
         p3 = QPointF(x2 - arrow_size * math.cos(angle + math.pi/6), y2 - arrow_size * math.sin(angle + math.pi/6))
-        self.state_scene.addPolygon(QPolygonF([p1, p2, p3]), QPen(Qt.PenStyle.NoPen), QBrush(QColor("#6c7086")))
+        arrow_item = self.state_scene.addPolygon(QPolygonF([p1, p2, p3]), QPen(Qt.PenStyle.NoPen), QBrush(QColor("#6c7086")))
         
         text = self.state_scene.addText(label)
         text.setDefaultTextColor(QColor("#a6adc8"))
         text.setFont(QFont("Segoe UI", 9))
         text.setPos(cx + 55, cy - 8)
+        self._register_edge(cx, cy, cx, cy, [path_item, arrow_item, text])
     
     def _draw_state(self, x: float, y: float, state_id: str,
                     is_initial: bool = False, is_final: bool = False):
@@ -1197,6 +1247,17 @@ class PDAPanel(QWidget):
 
         # Highlight the corresponding flowchart node
         self._highlight_state(step.to_state)
+        
+        # Highlight edge
+        from_keys = self._state_to_node_key(step.from_state)
+        to_keys = self._state_to_node_key(step.to_state)
+        
+        if from_keys and to_keys:
+            if not isinstance(from_keys, list): from_keys = [from_keys]
+            if not isinstance(to_keys, list): to_keys = [to_keys]
+            for fk in from_keys:
+                for tk in to_keys:
+                    self._highlight_edge(f"{fk}->{tk}")
         
         # Update stack visualization
         self.stack_view.set_stack(step.stack_after)

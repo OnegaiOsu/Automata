@@ -14,33 +14,34 @@ const state = {
 };
 
 const EXPR1_STATE_TO_NODE = {
-  '-':  'R0',
-  'q1': 'RR1',
-  'q2': 'RL1',
-  'q3': 'RR2',
-  'q4': 'RL2',
-  'T':  'Reject',
-  'q5': 'L1A', 
-  'q6': 'B1',
-  'q7': 'B2',
-  'q8': 'B3',
-  '+':  'Accept',
+  '-': 'Start',
+  'q1': 'Read1',
+  'T': 'Reject',
+  'q3': 'ReadA1',
+  'q2': 'ReadB1',
+  'q5': 'ReadA2',
+  'q4': 'ReadB2',
+  'q6': 'ReadLoop',
+  'q7': 'ReadBab1',
+  'q8': 'ReadBab2',
+  'q9': 'ReadBab3',
+  '+': 'Accept',
 };
 
 const EXPR2_STATE_TO_NODE = {
-  '-': 'R0',
-  'q1': 'L1',
-  'q3': 'R1',
-  'q2': 'L2',
-  'q8': 'R2',
-  'q10': 'R2',
-  'q5': 'M1',
-  'q6': 'M2',
-  'q4': 'L3',
-  'q7': 'T1',
-  'q9': 'M1',
+  '-': 'Start',
+  'q1': 'D_Top',
+  'T': 'Reject',
+  'q2': 'D_L1',
+  'q5': 'D_R1',
+  'q3': 'D_L2',
+  'q6': 'D_M_Right',
+  'q8': 'D_R2',
+  'q9': 'D_M_Left',
+  'q4': ['D_L3', 'D_BR'],
+  'q7': 'D_q7',
+  'q10': 'D_R3',
   '+': 'Accept',
-  'T': 'Reject'
 };
 
 function getApiBase() {
@@ -453,6 +454,8 @@ function findEdge(svgRoot, from, to) {
   for (const t of titles) {
     if (t.textContent === key) return t.parentNode;
   }
+  const el = svgRoot.querySelector(`g.edge[id="${key}"]`);
+  if (el) return el;
   return null;
 }
 
@@ -473,12 +476,23 @@ function highlightStep(panelId, step, prevStep) {
     toState = mapping[toState] || toState;
   }
   
-  const fromNode = findNode(svg, fromState);
-  const toNode = findNode(svg, toState);
-  const edge = findEdge(svg, fromState, toState);
-  if (fromNode) fromNode.classList.add('active');
-  if (toNode) toNode.classList.add('active');
-  if (edge) edge.classList.add('active');
+  const fromArr = Array.isArray(fromState) ? fromState : [fromState];
+  const toArr = Array.isArray(toState) ? toState : [toState];
+  
+  for (const f of fromArr) {
+    const n = findNode(svg, f);
+    if (n) n.classList.add('active');
+  }
+  for (const t of toArr) {
+    const n = findNode(svg, t);
+    if (n) n.classList.add('active');
+  }
+  for (const f of fromArr) {
+    for (const t of toArr) {
+      const e = findEdge(svg, f, t);
+      if (e) e.classList.add('active');
+    }
+  }
 }
 
 function renderStack(symbols, highlightKind) {
@@ -547,9 +561,9 @@ function applyStep(idx) {
   const step = state.steps[idx];
   const prev = state.steps[idx - 1];
   if (state.mode === 'pda') {
-    highlightStep('pda-graph', step, prev);
     if (step) {
-      const kind = step.stack_after.length > step.stack_before.length ? 'pushed'
+      const kind = !prev ? 'pushed'
+                 : step.stack_after.length > step.stack_before.length ? 'pushed'
                  : step.stack_after.length < step.stack_before.length ? 'popped'
                  : null;
       renderStack(step.stack_after, kind);
@@ -563,6 +577,7 @@ function applyStep(idx) {
       if (transEl) {
         transEl.innerHTML = `Step ${step.step_number}: <b>${step.from_state}</b> &rarr; <b>${step.symbol}</b> &rarr; <b>${step.to_state}</b><br/><span style="color:#89b4fa; font-size: 0.9em;">[${step.pda_action || 'No stack change'}]</span>`;
       }
+      highlightStep('pda-graph', step, prev);
     }
     renderTrace('view-pda', state.steps, idx);
   } else if (state.mode === 'cfg') {

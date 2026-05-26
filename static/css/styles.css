@@ -174,7 +174,7 @@ button.primary:hover { background: #b4befe; }
 /* Highlight classes injected onto SVG nodes/edges */
 .graph .node.active ellipse,
 .graph .node.active polygon { stroke: var(--green) !important; stroke-width: 4 !important; fill: #1e3a2f !important; }
-.graph .edge.active path,
+.graph .edge.active path { stroke: var(--green) !important; stroke-width: 3 !important; fill: none !important; }
 .graph .edge.active polygon { stroke: var(--green) !important; fill: var(--green) !important; stroke-width: 3 !important; }
 .graph .node text { fill: var(--text) !important; }
 .graph .edge text { fill: var(--muted) !important; }

@@ -7,6 +7,21 @@ const OFFSET_X = 150;
 function sx(x) { return (x - 250) * SCALE_X + 250 + OFFSET_X; }
 function sy(y) { return y * SCALE_Y; }
 
+function findNearestNode(x, y, nodes) {
+  let best = null;
+  let bestDist = Infinity;
+  for (const [key, node] of Object.entries(nodes)) {
+    const dx = node.x - x;
+    const dy = node.y - y;
+    const dist = dx*dx + dy*dy;
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = key;
+    }
+  }
+  return best;
+}
+
 function createSVG(width, height) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('width', width);
@@ -47,6 +62,8 @@ function createSVG(width, height) {
 
 function drawNode(svg, type, x, y, id, labelText) {
   x = sx(x); y = sy(y);
+  svg.nodeCoords = svg.nodeCoords || {};
+  svg.nodeCoords[id] = {x: x, y: y};
   
   const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
   g.setAttribute('class', 'node');
@@ -90,6 +107,14 @@ function drawNode(svg, type, x, y, id, labelText) {
 function drawPath(svg, points, textStr, textPos) {
   const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
   g.setAttribute('class', 'edge');
+  
+  if (svg.nodeCoords && points.length > 0) {
+    const from = findNearestNode(points[0].x, points[0].y, svg.nodeCoords);
+    const to = findNearestNode(points[points.length-1].x, points[points.length-1].y, svg.nodeCoords);
+    if (from && to) {
+      g.setAttribute('id', `${from}->${to}`);
+    }
+  }
   
   const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
   let d = `M ${points[0].x} ${points[0].y}`;
@@ -195,6 +220,13 @@ function drawLoop(svg, cx, cy, label, dir = 'right') {
   
   const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
   g.setAttribute('class', 'edge');
+  
+  if (svg.nodeCoords) {
+    const from = findNearestNode(cx, cy, svg.nodeCoords);
+    if (from) {
+      g.setAttribute('id', `${from}->${from}`);
+    }
+  }
   
   const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
   let d;
